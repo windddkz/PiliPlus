@@ -1,3 +1,4 @@
+#include "clock_resume.h"
 typedef void (*TimestampFn)(void *,int,int64_t,int64_t,int64_t);
 static uint64_t zero_timestamp_rejections;
 static int clock_diagnostics;
@@ -21,16 +22,19 @@ static ClockEstimate observed_estimate(void *state,int64_t first,int64_t second,
     return out;
 }
 static void corrected_timestamp(void *state,int valid,int64_t frames,int64_t stamp,int64_t now){
+    int raw_valid=valid;
     int anchored=0;int64_t anchor=0,anchor_time=0,previous_errors=0;
     if(clock_diagnostics){
         anchored=FIELD(state,0x39,unsigned char);anchor=FIELD(state,0x40,int64_t);
         anchor_time=FIELD(state,0x48,int64_t);previous_errors=FIELD(state,0x70,int64_t);
     }
     if(valid&&frames==0){valid=0;__atomic_add_fetch(&zero_timestamp_rejections,1,__ATOMIC_RELAXED);}
+    int rebased=resume_clock_timestamp(state,valid,frames,stamp,now);
     ((TimestampFn)(base+0x18b394))(state,valid,frames,stamp,now);
+    if(rebased)__android_log_print(ANDROID_LOG_INFO,"PiliClockResume","fresh timestamp accepted after resume frames=%lld",(long long)frames);
     if(clock_diagnostics)__android_log_print(ANDROID_LOG_INFO,"PiliClockTrace",
-        "state=%p valid=%d frames=%lld stamp=%lld now=%lld rate=%d before=%d,%lld,%lld,%lld after=%d,%lld,%lld,%lld last_out=%lld last_stamp_frame=%lld drift_limit=%lld drift_instruction=%08x",
-        state,valid,(long long)frames,(long long)stamp,(long long)now,FIELD(state,8,int),
+        "state=%p raw_valid=%d valid=%d frames=%lld stamp=%lld now=%lld rate=%d before=%d,%lld,%lld,%lld after=%d,%lld,%lld,%lld last_out=%lld last_stamp_frame=%lld drift_limit=%lld drift_instruction=%08x",
+        state,raw_valid,valid,(long long)frames,(long long)stamp,(long long)now,FIELD(state,8,int),
         anchored,(long long)anchor,(long long)anchor_time,(long long)previous_errors,
         FIELD(state,0x39,unsigned char),(long long)FIELD(state,0x40,int64_t),(long long)FIELD(state,0x48,int64_t),(long long)FIELD(state,0x70,int64_t),
         (long long)FIELD(state,0x50,int64_t),(long long)FIELD(state,0x60,int64_t),(long long)FIELD(state,0x30,int64_t),FIELD((void *)base,0x18b488,uint32_t));

@@ -233,7 +233,7 @@ static int replace_stretcher(int install){
     return replace((uintptr_t *)(base+0x2ca920),install?old:next,install?next:old);
 }
 #include "video_trace.h"
-static int (*const changes[])(int)={replace_source,replace_decoder,replace_clock_timestamp,replace_video_trace,replace_stretcher,replace_reset_flush,replace_timeline_flush,replace_timeline_reset};
+static int (*const changes[])(int)={replace_source,replace_decoder,replace_clock_timestamp,replace_video_trace,replace_stretcher,replace_reset_flush,replace_timeline_flush,replace_timeline_reset,replace_clock_resume};
 static int installed;
 static void restore(JNIEnv *env){
     while(installed){
