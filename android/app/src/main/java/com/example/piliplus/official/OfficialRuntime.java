@@ -13,6 +13,7 @@ import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** One original player owns audio, video and timing in our dedicated process. */
 final class OfficialRuntime {
@@ -353,10 +354,15 @@ final class OfficialRuntime {
             Object descriptor=construct("com.bilibili.ijk.player.PlayerItem",asset,0L,false,0,null,null,0,0,render,254,null);
             item=construct("com.bilibili.ijk.player.AndroidNativePlayerItem",descriptor);
             resourceRefresh.open();
-            invoke(item,"setResourceUpdateListener",resourceListener(token,new Bundle(request)));
+            AtomicInteger resourceUpdates=new AtomicInteger();
+            invoke(item,"setResourceUpdateListener",resourceListener(token,new Bundle(request),resourceUpdates));
             if(!Boolean.TRUE.equals(invoke(player,"switchItem",item)))throw new IOException("switchItem rejected");
             route.start();describeRoute("route_selected");
-            worker.postDelayed(()->run(token,()->{if(!prepared)throw new IOException("Preparation timeout");}),20000);
+            worker.postDelayed(()->run(token,()->{
+                if(prepared)return;
+                if(resourceUpdates.get()>0)failResource();
+                else {release();throw new IOException("Preparation timeout");}
+            }),20000);
         } catch(Exception | LinkageError error) {try{release();}catch(Exception | LinkageError cleanup){error.addSuppressed(cleanup);}throw error;}
     }
     private static OfficialStream streamInfo(Bundle info,String source) {
@@ -366,7 +372,11 @@ final class OfficialRuntime {
     boolean resourceUpdate(Bundle data) {
         return data.getLong("load",-1)==load && resourceRefresh.complete(data.getLong("requestId",-1),data);
     }
-    private Object resourceListener(long token,Bundle original) throws Exception {
+    private void failResource() throws Exception {
+        release();
+        Bundle event=new Bundle();event.putString("event","resource_error");event.putString("error","resource_unavailable");emit(event);
+    }
+    private Object resourceListener(long token,Bundle original,AtomicInteger resourceUpdates) throws Exception {
         return Proxy.newProxyInstance(loader,new Class<?>[]{cls("com.bilibili.ijk.callback.OnResourceUpdateListener")},(proxy,method,args)->{
             switch(method.getName()) {
                 case "toString":return "PiliPlusResourceUpdate";
@@ -376,6 +386,8 @@ final class OfficialRuntime {
                 default:throw new UnsupportedOperationException(method.getName());
             }
             if(token!=generation || !resourceRefresh.isOpen())return null;
+            // Keep failures pending until the worker terminates this generation.
+            resourceUpdates.incrementAndGet();
             try {
                 Bundle next=resourceRefresh.await(20000,id->worker.post(()->run(token,()->{
                     Bundle event=new Bundle();event.putString("event","resource_refresh");event.putLong("requestId",id);emit(event);
@@ -386,6 +398,7 @@ final class OfficialRuntime {
                 Object replacement=updatedAsset(old,original,next);
                 if(token!=generation || !resourceRefresh.isOpen())return null;
                 worker.post(()->run(token,()->{
+                    resourceUpdates.decrementAndGet();
                     for(String key:new String[]{"source","audio"})openRequest.putString(key,next.getString(key));
                     for(String key:new String[]{"sourceTrack","audioTrack"})openRequest.putBundle(key,next.getBundle(key));
                     Bundle event=new Bundle();event.putString("event","resource_updated");event.putLong("requestId",next.getLong("requestId"));emit(event);
@@ -394,8 +407,7 @@ final class OfficialRuntime {
             } catch(Exception error) {
                 worker.post(()->run(token,()->{
                     // Returning null alone tells the original DASH director to retry the old URLs.
-                    release();
-                    Bundle event=new Bundle();event.putString("event","resource_error");event.putString("error","resource_unavailable");emit(event);
+                    failResource();
                 }));
                 return null;
             }
