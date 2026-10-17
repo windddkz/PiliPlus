@@ -17,8 +17,9 @@ CodecItem? matchLiveCodec(
     for (final entry in stream.format) {
       if (entry.formatName != format) continue;
       for (final item in entry.codec) {
-        if (item.codecName == codec && item.currentQn.code == quality)
+        if (item.codecName == codec && item.currentQn.code == quality) {
           return item;
+        }
       }
     }
   }

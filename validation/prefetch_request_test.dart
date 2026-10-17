@@ -12,11 +12,13 @@ class FailingAdapter implements HttpClientAdapter {
     RequestOptions options,
     Stream<Uint8List>? body,
     Future<void>? cancel,
-  ) async {
+  ) {
     attempts++;
-    throw DioException.connectionError(
-      requestOptions: options,
-      reason: 'offline',
+    return Future.error(
+      DioException.connectionError(
+        requestOptions: options,
+        reason: 'offline',
+      ),
     );
   }
 

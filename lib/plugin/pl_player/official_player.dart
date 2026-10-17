@@ -1067,10 +1067,6 @@ class OfficialPlayer extends PlatformPlayer {
       } finally {
         codec.dispose();
       }
-    } on PlatformException {
-      return null;
-    } on FileSystemException {
-      return null;
     } on Exception {
       return null;
     } finally {

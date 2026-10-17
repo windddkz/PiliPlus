@@ -50,13 +50,12 @@ class PlaybackSubtitleView extends StatefulWidget {
   });
 
   @override
-  PlaybackSubtitleViewState createState() => PlaybackSubtitleViewState();
+  State<PlaybackSubtitleView> createState() => _PlaybackSubtitleViewState();
 }
 
-class PlaybackSubtitleViewState extends State<PlaybackSubtitleView> {
+class _PlaybackSubtitleViewState extends State<PlaybackSubtitleView> {
   late Subtitle subtitle = widget.player.state.subtitle;
   late EdgeInsets padding = widget.configuration.padding;
-  late Duration duration = const Duration(milliseconds: 100);
 
   // The [StreamSubscription] to listen to the subtitle changes.
   StreamSubscription<Subtitle>? subscription;
@@ -75,20 +74,6 @@ class PlaybackSubtitleViewState extends State<PlaybackSubtitleView> {
   void dispose() {
     subscription?.cancel();
     super.dispose();
-  }
-
-  void setPadding(
-    EdgeInsets padding, {
-    Duration duration = const Duration(milliseconds: 100),
-  }) {
-    if (this.duration != duration) {
-      setState(() {
-        this.duration = duration;
-      });
-    }
-    setState(() {
-      this.padding = padding;
-    });
   }
 
   @override
@@ -129,7 +114,7 @@ class PlaybackSubtitleViewState extends State<PlaybackSubtitleView> {
 
     return AnimatedContainer(
       margin: padding,
-      duration: duration,
+      duration: const Duration(milliseconds: 100),
       alignment: Alignment.bottomCenter,
       child: widget.enableDragSubtitle
           ? GestureDetector(

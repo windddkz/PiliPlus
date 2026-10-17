@@ -6,7 +6,7 @@ import 'package:PiliPlus/models/video/play/url.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  final key = (bvid: 'BV-test', cid: 1, tryLook: false, voiceBalance: true);
+  const key = (bvid: 'BV-test', cid: 1, tryLook: false, voiceBalance: true);
   late Object account;
   late DateTime now;
   late PlayUrlPrefetch cache;
@@ -152,7 +152,7 @@ void main() {
     expect(calls, 3);
     ready.complete(Success(PlayUrlModel()));
     await Future.wait(jobs);
-    final fourth = (
+    const fourth = (
       bvid: 'BV-test',
       cid: 4,
       tryLook: false,

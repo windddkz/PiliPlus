@@ -144,7 +144,7 @@ void main() {
       );
       final capture = await player.screenshot();
       expect((capture?.width, capture?.height), (3, 2));
-      expect(await file.exists(), false);
+      expect(file.existsSync(), false);
       capture?.dispose();
       await player.dispose();
     } finally {
@@ -157,8 +157,9 @@ void main() {
     () async {
       final player = await create();
       messenger.setMockMethodCallHandler(commands, (call) async {
-        if (call.method == 'screenshot')
+        if (call.method == 'screenshot') {
           throw PlatformException(code: 'capture_failed');
+        }
         return null;
       });
       expect(await player.screenshot(), null);
@@ -179,7 +180,7 @@ void main() {
             .writeAsString('stale');
         reply.complete(file.path);
         expect(await capture, null);
-        expect(await file.exists(), false);
+        expect(file.existsSync(), false);
       } finally {
         await directory.delete(recursive: true);
       }
@@ -191,7 +192,7 @@ void main() {
     () async {
       final player = await preparedLadder();
       await player.setSubtitleTrack(
-        SubtitleTrack(
+        const SubtitleTrack(
           'memory://WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n你好\n第二行\n\n00:00:02.000 --> 00:00:04.000\n重叠',
           '中文',
           'zh',
