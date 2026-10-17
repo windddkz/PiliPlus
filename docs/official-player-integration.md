@@ -4,7 +4,7 @@
 
 这份指南解释这个方案怎样落地，以及哪些地方仍然需要验证。它面向准备接手代码的音视频、Android 和 Flutter 工程师。文中的主要参照物是国内版 B 站 **9.14.0 / 9140400**，研究对象限定为观看视频、听音频和直播，排除了投稿编辑器、录制和通话的处理代码。早期研究用过 `com.bilibili.app.in` 6.6.0 / 9130300 和国际版 3.83.0 / 3830100；它们的发现只有经过当前版本复核，才能用于本实现。
 
-截至 2026-10-17，本轮在 308/311 基础上补齐了文字字幕、截图和实际输出反馈，开发包为 316。311 只撤除了临时 CPU 采样许可，播放器行为与 308 相同；314～316 的变化及小米 14 验证范围见[本轮记录](playback-316-validation.md)。首开性能优化已经暂停，详情见[另一份指南](video-startup-optimization.md)。这里不把用户的“已经接近”扩大为所有视频、设备和输出方式完全一致。
+截至 2026-10-17，已接入文字字幕、截图和实际输出反馈，并同步上游 main；这些功能及其验证范围在下文分别说明。当前正在改造预载调度与跨页留存，相关结果待验证后补入[首开优化指南](video-startup-optimization.md)。所有视频、设备和输出方式的听感与观感对齐仍待验证。
 
 ## 一、先弄清楚接入的是什么
 
@@ -303,6 +303,12 @@ ORG_GRADLE_PROJECT_officialAudio=true flutter build apk \
 
 回退保留已验证 APK、源码身份、运行 manifest 和必要设置。相同签名下系统允许的降级可用 `adb install -r -d`，若设备不允许就使用旧源码前向版本构建；不把卸载清数据当默认回退。已有回退机制没变化时不机械重复覆盖降级。小米 USB 安装是否需点击取决于设备设置/系统策略，本项目已获得实机安装授权，但不向后来用户承诺所有小米免确认。
 
+## 代码维护与上游同步
+
+Dart 沿用仓库的 `analysis_options.yaml` 和 `dart format`；自有 Java/C 使用根目录 `.clang-format`，Python 使用 Black。格式整理、功能修复和上游合并分别提交，便于审阅和回退。构建输入、官方库身份及路径范围使用显式分支校验，确保 `python -O` 下仍能拒绝错误输入。
+
+合并上游时，需要检查模型和调用契约的变化。画质已采用对象模型，刷新匹配应比较 `currentQn.code` 与请求档位，并继续匹配协议、封装和编码；点播反馈使用 `VideoQuality.fromFormat` 保留服务端档位。播放请求的 method/data、预取账号与取消标识，以及键盘倍速入口，都需要沿实际调用链回归。原生私有偏移的修改还须核对目标库哈希、指令守卫和失败路径。
+
 ## 测试方法与样本
 
 ### 主机可执行边界检查
@@ -321,7 +327,7 @@ python3 validation/dolby_loudness_test.py
 
 timeline、audio_buffer、media_adaptive、media_dash、Dolby policy、first_seek 也有独立 C 检查；Dolby endpoint 需配置好的 FFmpeg include。`network_read_test.c` 含 ARM64 汇编，应交叉编译后在适配的自有 ARM64 进程运行；TLS 测试还需锁定的原库，不能把主机编译失败误判产品故障。
 
-整理 fork 时重新运行上述四个 Python 检查、8 个主机 C 检查与 DEX/资产核验，通过范围见证据库的 `publication_validation`。buffering 脚本最初截取了无关的 `previous_pts` 声明导致 `-Werror`，只修正测试截取边界；没有修改生产 gate。该次整理未重新执行全量 Android Lint、所有 Dart/真机测试。这是整理 fork 时的历史结果。317 重新完成了全仓检查、上游合并和代码整理，当前验证范围及遗留 Lint 见[317 审查记录](maintenance-317-review.md)。
+整理 fork 时重新运行上述四个 Python 检查、8 个主机 C 检查与 DEX/资产核验，通过范围见证据库的 `publication_validation`。buffering 脚本最初截取了无关的 `previous_pts` 声明导致 `-Werror`，只修正测试截取边界；没有修改生产 gate。该次整理未重新执行全量 Android Lint、所有 Dart/真机测试。这是整理 fork 时的历史结果。后续维护回归通过 157 项 Dart 测试、8 组 C、6 份 Python、15 组 Java 主机检查及 8 组 Android 受控检查。Dart analyze 为 0 error、0 warning；Android Lint 仍有 7 个上游错误、50 个警告，主要涉及 UCropActivity 清单引用和主题属性 API 级别。逐轮审查、安装身份及测量明细归档于研究工作区的 execution 目录。
 
 ### 有意义的信号与样本
 
@@ -436,7 +442,7 @@ timeline、audio_buffer、media_adaptive、media_dash、Dolby policy、first_see
 |90–108|直播、时间线、焦点、回收、蓝牙/扬声器链对照|E106、E111–E123、E132–E133、E145–E156|
 |118–135|暂停恢复重锚、横屏、原地端点、长按、seek冻结遗漏|E108–E109、E129、E158、E163、E165、E191及证据索引|
 |149–152|真24位/原图量化、旧SDL多声道参考、AC3补证、AC4研究|E160、E171–E172|
-|314–316功能补齐|文字字幕、原帧截图、实际输出与引擎倍率；指南重写|[本轮记录](playback-316-validation.md)|
+|字幕、截图与输出诊断|文字字幕、原帧截图、实际输出与引擎倍率|本文对应功能章节；本地 `execution/20261017-playback314/`|
 |136–311首开专项|预热/预读、供数、缓存、呈现、自动画质；仍未稳定400–500ms|第二份指南|
 
 还未完成的是：所有视频/设备/入口的听感与观感等价，真实空间化与物理多声道，部分新核编码（如 AC4），完整焦点策略、倍速严格波形/极端速率，HDR/路由/交互交叉组合，以及网络与切档连续性长尾。用户报告的偶发热切换卡顿不能用端点注入测试一笔勾销。
