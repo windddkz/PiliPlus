@@ -1,7 +1,8 @@
 """Exercise the production decode callback's Dolby gate and error/video-frame handling."""
 
 from pathlib import Path
-import subprocess, tempfile
+import subprocess
+import tempfile
 
 repo = Path(__file__).resolve().parents[1]
 s = (repo / "android/official_audio/graph_adapter.c").read_text()
