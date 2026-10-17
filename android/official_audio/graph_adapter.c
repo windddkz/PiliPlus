@@ -177,8 +177,7 @@ done:
 
     pthread_mutex_unlock(&lock);pthread_mutex_unlock(&lp_lock);return result;
 }
-static int replace(Read expected,Read next){
-    Read *slot=(Read *)(base+0x2b7788);
+static int replace(uintptr_t *slot,uintptr_t expected,uintptr_t next){
     if(__atomic_load_n(slot,__ATOMIC_ACQUIRE)!=expected)return -1;
     long page=sysconf(_SC_PAGESIZE);if(page<=0)return -1;
     void *address=(void *)((uintptr_t)slot&~((uintptr_t)page-1));
@@ -190,9 +189,23 @@ static int replace(Read expected,Read next){
     return -1;
 }
 static void fail(JNIEnv *env,const char *message){(*env)->ThrowNew(env,(*env)->FindClass(env,"java/lang/IllegalStateException"),message);}
-static int replace_source(int install){return replace(install?original:adapted,install?adapted:original);}
+static int replace_source(int install){return replace((uintptr_t *)(base+0x2b7788),(uintptr_t)(install?original:adapted),(uintptr_t)(install?adapted:original));}
+static void (*soundtouch_constructor)(void *);
+static int (*soundtouch_setting)(void *,int,int);
+static int stretch_error;
+static void soundtouch_adjusted(void *object){
+    soundtouch_constructor(object);
+    // The official SDL factory uses a 16ms overlap; AudioGraph otherwise keeps the 8ms default.
+    int ok=soundtouch_setting(object,5,16);
+    if(!ok)__atomic_store_n(&stretch_error,1,__ATOMIC_RELAXED);
+    __android_log_print(ANDROID_LOG_INFO,"PiliStretch","official overlap_ms=16 applied=%d",ok);
+}
+static int replace_stretcher(int install){
+    uintptr_t old=(uintptr_t)soundtouch_constructor,next=(uintptr_t)soundtouch_adjusted;
+    return replace((uintptr_t *)(base+0x2ca920),install?old:next,install?next:old);
+}
 #include "video_trace.h"
-static int (*const changes[])(int)={replace_source,replace_decoder,replace_clock_timestamp,replace_video_trace};
+static int (*const changes[])(int)={replace_source,replace_decoder,replace_clock_timestamp,replace_video_trace,replace_stretcher};
 static int installed;
 static void restore(JNIEnv *env){
     while(installed){
@@ -212,6 +225,13 @@ JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_startGraphAdapter(J
     if(lp_open()){fail(env,"Locked filter runtime unavailable");return;}
     receive_original=dlsym(lp_lib,"avcodec_receive_frame");flush_original=dlsym(lp_lib,"avcodec_flush_buffers");
     if(!receive_original||!flush_original){lp_close();fail(env,"Decoder APIs unavailable");return;}
+    void *stretch_lib=dlopen("libijkffext.so",RTLD_NOW|RTLD_NOLOAD);
+    if(!stretch_lib){lp_close();fail(env,"Original stretcher unavailable");return;}
+    soundtouch_constructor=dlsym(stretch_lib,"_ZN10soundtouch10SoundTouchC1Ev");
+    soundtouch_setting=dlsym(stretch_lib,"_ZN10soundtouch10SoundTouch10setSettingEii");
+    dlclose(stretch_lib);
+    if(!soundtouch_constructor||!soundtouch_setting){lp_close();fail(env,"Original stretcher APIs unavailable");return;}
+    stretch_error=0;
     lp_profile=loudness_enabled?1:0;lp_metadata_gain_db=gain_db;clock_diagnostics=diagnostics;video_trace_enabled=video_diagnostics;
     original=(Read)(base+0x159d70);enabled=trim_eof=1;errors=0;
     filter_tid=source_tid=0;filter_total_ns=filter_max_ns=filter_over_40ms=0;
@@ -231,7 +251,7 @@ JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_startGraphAdapter(J
 }
 JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_getGraphState(JNIEnv *env,jclass cls){
     (void)cls;pthread_mutex_lock(&lp_lock);pthread_mutex_lock(&lock);
-    char out[512];snprintf(out,sizeof(out),"{\"active\":%s,\"errors\":%d,\"filter_error\":%d,\"sample_rate\":%d,\"channels\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"duplicate_eof_frames\":%llu}",active?"true":"false",errors,lp_error,last_rate,last_channels,(unsigned long long)lp_frames,(unsigned long long)converted_frames,(unsigned long long)duplicate_eof_frames);
+    char out[512];snprintf(out,sizeof(out),"{\"active\":%s,\"errors\":%d,\"filter_error\":%d,\"sample_rate\":%d,\"channels\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"duplicate_eof_frames\":%llu}",active?"true":"false",errors+__atomic_load_n(&stretch_error,__ATOMIC_RELAXED),lp_error,last_rate,last_channels,(unsigned long long)lp_frames,(unsigned long long)converted_frames,(unsigned long long)duplicate_eof_frames);
     pthread_mutex_unlock(&lock);pthread_mutex_unlock(&lp_lock);return (*env)->NewStringUTF(env,out);
 }
 JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_finishGraphAdapter(JNIEnv *env,jclass cls){
@@ -239,7 +259,7 @@ JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_finishGraphAdapt
     restore(env);
     pthread_mutex_lock(&lp_lock);pthread_mutex_lock(&lock);active=0;lp_close();
     if(previous_frame){release_frame(previous_frame);previous_frame=NULL;}
-    char out[512];snprintf(out,sizeof(out),"{\"restored\":true,\"video_trace_enabled\":%s,\"errors\":%d,\"filter_error\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"filtered_samples\":%llu,\"duplicate_eof_frames\":%llu}",video_trace_enabled?"true":"false",errors,lp_error,(unsigned long long)lp_frames,(unsigned long long)converted_frames,(unsigned long long)lp_samples,(unsigned long long)duplicate_eof_frames);
+    char out[512];snprintf(out,sizeof(out),"{\"restored\":true,\"video_trace_enabled\":%s,\"errors\":%d,\"filter_error\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"filtered_samples\":%llu,\"duplicate_eof_frames\":%llu}",video_trace_enabled?"true":"false",errors+__atomic_load_n(&stretch_error,__ATOMIC_RELAXED),lp_error,(unsigned long long)lp_frames,(unsigned long long)converted_frames,(unsigned long long)lp_samples,(unsigned long long)duplicate_eof_frames);
     pthread_mutex_unlock(&lock);pthread_mutex_unlock(&lp_lock);return (*env)->NewStringUTF(env,out);
 }
 

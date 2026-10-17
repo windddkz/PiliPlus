@@ -215,7 +215,7 @@ final class OfficialRuntime {
             worker.post(()->run(token,()->{
                 switch(event) {
                     case "prepared":
-                        updateDisplaySize();prepared=true;stage("playback");if(route.endpoint()!=appliedEndpoint){applyRoute();break;}invoke(player,"setSpeed",speed);invoke(player,"setVolume",volume);
+                        updateDisplaySize();prepared=true;stage("playback");if(route.endpoint()!=appliedEndpoint){applyRoute();break;}speed(speed);invoke(player,"setVolume",volume);
                         if(startPosition>0)invoke(player,"seekTo",true,startPosition,5000L);
                         if(wantedPlaying)invoke(player,"start");emit("prepared");heartbeat(token);break;
                     case "completed":wantedPlaying=false;emit("completed");break;
@@ -235,7 +235,7 @@ final class OfficialRuntime {
                     default:emit(event);
                 }
             }));
-            return cls("Gy1.q").getField("a").get(null);
+            return cls("kotlin.Unit").getField("INSTANCE").get(null);
         });
     }
     void open(Bundle request,Surface surface) throws Exception {
@@ -271,7 +271,7 @@ final class OfficialRuntime {
                     {"setOnSeekCompleteCallback",5,"seek_complete"},{"setOnBufferingUpdateCallback",2,"buffering"},{"setOnVideoSizeChangedCallback",3,"video_size"}})
                 invoke(player,(String)binding[0],callback((Integer)binding[1],(String)binding[2],token));
             boolean audioOnly=request.getBoolean("audioOnly",false);
-            invoke(player,"setAudioOnly",audioOnly);invoke(player,"setVolume",volume);invoke(player,"setSpeed",speed);
+            invoke(player,"setAudioOnly",audioOnly);invoke(player,"setVolume",volume);speed(speed);
             if(!audioOnly&&surface!=null) {
                 invoke(cls("tv.danmaku.ijk.media.player.render.core.BiliRenderContext"),"init",context);
                 cls("tv.danmaku.ijk.media.player.render.IjkExternalRenderThread").getField("EXTERNAL_RENDER_TYPE").setInt(null,0);
@@ -343,7 +343,8 @@ final class OfficialRuntime {
             if(graph.getInt("errors")!=0||graph.getInt("filter_error")!=0)throw new IOException("Audio adaptation failed");
             Bundle b=new Bundle();b.putString("event","state");route.describe(b);
             b.putLong("position",(Long)invoke(player,"getCurrentPosition"));b.putLong("duration",(Long)invoke(player,"getDuration"));
-            b.putBoolean("playing",(Boolean)invoke(player,"isPlaying"));b.putFloat("speed",(Float)invoke(player,"getSpeed"));b.putFloat("volume",volume);
+            float nativeSpeed=(Float)invoke(player,"getSpeed");
+            b.putBoolean("playing",(Boolean)invoke(player,"isPlaying"));b.putFloat("speed",speed==2f&&nativeSpeed==1.99f?2f:nativeSpeed);b.putFloat("volume",volume);
             b.putInt("width",displayWidth);b.putInt("height",displayHeight);
             Object monitor=invoke(player,"getPlayerMonitor");long buffered=(Long)invoke(monitor,"getPacketQueueCacheDurationMs",1);
             long duration=b.getLong("duration"),position=b.getLong("position");
@@ -399,7 +400,8 @@ final class OfficialRuntime {
     }
     void speed(float value) throws Exception {
         if(!Float.isFinite(value)||value<.25f||value>4)throw new IllegalArgumentException("Invalid speed");
-        if(player!=null)invoke(player,"setSpeed",value);speed=value;
+        // Official 9.14 setPlaySpeed uses 1.99 internally while displaying and saving 2x.
+        if(player!=null)invoke(player,"setSpeed",value==2f?1.99f:value);speed=value;
     }
     void volume(float value) throws Exception {
         if(!Float.isFinite(value)||value<0||value>1)throw new IllegalArgumentException("Invalid volume");
