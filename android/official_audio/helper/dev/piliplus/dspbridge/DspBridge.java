@@ -7,6 +7,7 @@ public final class DspBridge {
     public static native void installMediaInspection();
     public static native void installFirstSeek();
     public static native void installMediaDash();
+    public static native void installNetworkRead(boolean enabled);
     public static native int classifyHdr(long nativeItem);
     public static native void interruptPreload(long nativeItem);
     public static native void startGraphAdapter(boolean loudnessEnabled, double gainDb, boolean diagnostics, boolean prefill, boolean videoDiagnostics);
