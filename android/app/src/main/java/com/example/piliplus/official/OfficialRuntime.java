@@ -25,8 +25,8 @@ final class OfficialRuntime {
     private final Events events;
     private DexClassLoader loader;
     private Object player, item, externalRenderer, externalOutput;
-    private Object preloader;
-    private OfficialPreloadCache<NativeMedia> preloads;
+    private Object preloader, foregroundPreloader, awaitingPreloader;
+    private OfficialPreloadCache<NativeMedia> preloads, foregroundPreloads;
     private NativeMedia awaitingOutput;
     private OfficialMediaCache mediaCache;
     private boolean mediaCacheAttempted;
@@ -404,29 +404,43 @@ final class OfficialRuntime {
         return hash(key.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
     private void preloadFailure(Exception error) {
-        if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.w("PiliPreload","disabled: "+error.getClass().getSimpleName());
-        if(awaitingPreload!=0 && awaitingPreload==generation)fail(error);
+        preloadFailure(preloader,error);
     }
-    private void preloadResult(String method,Object... args) throws Exception {
-        if(((Number)invoke(preloader,method,args)).intValue()!=0)throw new IOException("Native preload command rejected");
+    private void preloadFailure(Object owner,Exception error) {
+        if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.w("PiliPreload","disabled: "+error.getClass().getSimpleName());
+        if(awaitingPreload!=0 && awaitingPreload==generation && awaitingPreloader==owner)fail(error);
+    }
+    private void preloadResult(Object owner,String method,Object... args) throws Exception {
+        if(((Number)invoke(owner,method,args)).intValue()!=0)throw new IOException("Native preload command rejected");
     }
     private void ensurePreloader() throws Exception {
         if(preloads!=null)return;
+        if(preloader!=null)throw new IOException("Preloader initialization previously failed");
         preloader=construct("com.bilibili.ijk.preload.IJKNativePreloader");
-        String add=Arrays.stream(preloader.getClass().getDeclaredMethods()).map(Method::getName)
+        preloads=createPreloadCache(preloader,3);
+    }
+    private void ensureForegroundPreloader() throws Exception {
+        if(foregroundPreloads!=null)return;
+        if(foregroundPreloader!=null)throw new IOException("Metadata preloader initialization previously failed");
+        // The native API has no destroy; keep one foreground queue for the process lifetime.
+        foregroundPreloader=construct("com.bilibili.ijk.preload.IJKNativePreloader");
+        foregroundPreloads=createPreloadCache(foregroundPreloader,1);
+    }
+    private OfficialPreloadCache<NativeMedia> createPreloadCache(Object owner,int capacity) throws Exception {
+        String add=Arrays.stream(owner.getClass().getDeclaredMethods()).map(Method::getName)
             .filter(name->name.startsWith("addTask-")).findFirst().orElseThrow(()->new NoSuchMethodException("addTask"));
-        preloads=new OfficialPreloadCache<>(new OfficialPreloadCache.Backend<NativeMedia>() {
-            public void add(long request,long task,NativeMedia media) throws Exception {preloadResult(add,request,task,media.item,(byte)50,media.preloadTarget);}
-            public void detach(long request,long task,NativeMedia media) throws Exception {preloadResult("detachTask",request,task,media.item);}
+        OfficialPreloadCache<NativeMedia> cache=new OfficialPreloadCache<>(new OfficialPreloadCache.Backend<NativeMedia>() {
+            public void add(long request,long task,NativeMedia media) throws Exception {preloadResult(owner,add,request,task,media.item,(byte)50,media.preloadTarget);}
+            public void detach(long request,long task,NativeMedia media) throws Exception {preloadResult(owner,"detachTask",request,task,media.item);}
             public void interrupt(NativeMedia media) throws Exception {
                 Object handle=invoke(media.item,"nativePtrOrNull$srcs_base_ijk_ijk_library_android");
                 if(!(handle instanceof Long))throw new IllegalStateException("Missing native preload item");
                 bridge("interruptPreload",handle);
             }
-            public void remove(long request,long task,NativeMedia media) throws Exception {preloadResult("removeTask",request,task,media.item);}
+            public void remove(long request,long task,NativeMedia media) throws Exception {preloadResult(owner,"removeTask",request,task,media.item);}
             public void release(NativeMedia media) throws Exception {releaseItem(media.item);}
-            public void failed(Exception error){preloadFailure(error);}
-        },(delay,action)->worker.postDelayed(action,delay),SystemClock::elapsedRealtime);
+            public void failed(Exception error){preloadFailure(owner,error);}
+        },(delay,action)->worker.postDelayed(action,delay),SystemClock::elapsedRealtime,capacity);
         Object cb=Proxy.newProxyInstance(loader,new Class<?>[]{cls("kotlin.jvm.functions.Function1")},(proxy,method,args)->{
             switch(method.getName()){
                 case "toString":return "PiliPlusPreloader";
@@ -437,16 +451,17 @@ final class OfficialRuntime {
                         try {
                             String type=invoke(event,"getType").toString();int error=(Integer)invoke(event,"getError");
                             long request=(Long)invoke(event,"getRequestId"),task=(Long)invoke(event,"getTaskId");
-                            preloads.event(request,task,type,error);
-                            drainPreloads();
-                            if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.d("PiliPreload",type+" request="+request+" task="+task+" error="+error+" retained="+preloads.size());
-                        } catch(Exception error){preloadFailure(error);}
+                            cache.event(request,task,type,error);
+                            if(owner==preloader)drainPreloads();
+                            if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.d("PiliPreload",type+" foreground="+(owner==foregroundPreloader)+" request="+request+" task="+task+" error="+error+" retained="+cache.size());
+                        } catch(Exception error){preloadFailure(owner,error);}
                     });
                     return cls("kotlin.Unit").getField("INSTANCE").get(null);
                 default:throw new UnsupportedOperationException(method.getName());
             }
         });
-        invoke(preloader,"setEventCallback",cb);
+        invoke(owner,"setEventCallback",cb);
+        return cache;
     }
     void preload(Bundle data) throws Exception {
         initialize();String key=preloadKey(data);
@@ -522,10 +537,11 @@ final class OfficialRuntime {
     void close() throws Exception {
         release();
         // Unconfirmed native ownership is reclaimed by the existing failed-close process barrier.
-        if(preloads!=null && preloads.isBroken())throw new IOException("Preload stop unconfirmed");
+        if((preloads!=null && preloads.isBroken()) || (foregroundPreloads!=null && foregroundPreloads.isBroken()))
+            throw new IOException("Preload stop unconfirmed");
     }
     private void useItem(Object next,long token,Bundle request) throws Exception {
-        item=next;awaitingPreload=0;resourceRefresh.open();
+        item=next;awaitingPreload=0;awaitingPreloader=null;resourceRefresh.open();
         AtomicInteger resourceUpdates=new AtomicInteger();
         invoke(item,"setResourceUpdateListener",resourceListener(token,new Bundle(request),resourceUpdates));
         if(!Boolean.TRUE.equals(invoke(player,"switchItem",item)))throw new IOException("switchItem rejected");
@@ -591,18 +607,18 @@ final class OfficialRuntime {
             awaitingMediaInfo=media.nativeMetadata;
             stage("prepare");
             if(media.nativeMetadata) {
-                ensurePreloader();awaitingPreload=token;
+                awaitingPreload=token;
                 String key=cacheKey==null?"foreground-"+token:cacheKey;
                 prepareNativeMedia(key,media,cached!=null,token,request,SystemClock.elapsedRealtime()+20000);
                 return;
             }
             configureOutput(media.hdr);
             if(cached!=null){
-                awaitingPreload=token;
+                awaitingPreload=token;awaitingPreloader=preloader;
                 boolean taken=preloads.take(cacheKey,ready->consumePreload(ready,token,request));
                 preloads.discardExcept(cacheKey);
                 if(taken)return;
-                awaitingPreload=0;
+                awaitingPreload=0;awaitingPreloader=null;
             }
             useItem(nativeItem(media.asset,0),token,request);
         } catch(Exception | LinkageError error) {try{release();}catch(Exception | LinkageError cleanup){error.addSuppressed(cleanup);}throw error;}
@@ -625,10 +641,9 @@ final class OfficialRuntime {
                 if(kind==-1 && media.preloadTarget>1) {
                     // A not-yet-opened preload may detach before it has metadata; prepare the same item once.
                     String key=preloadKey(request);if(key==null)key="foreground-"+token;
-                    media.preloadTarget=1;item=null;
-                    if(!preloads.add(key,media) || !preloads.takeReady(key,ready->consumePreload(ready,token,request)))
-                        throw new IOException("Native metadata preparation unavailable");
-                    stage("prepare_metadata");return;
+                    stage("prepare_metadata");
+                    prepareNativeMedia(key,media,false,token,request,SystemClock.elapsedRealtime()+20000);
+                    return;
                 }
                 if(kind<0 || kind>3)throw new IOException("Unknown prepared HDR metadata");
                 configureOutput(kind!=0);awaitingMediaInfo=false;
@@ -640,20 +655,26 @@ final class OfficialRuntime {
     }
     private void prepareNativeMedia(String key,NativeMedia media,boolean cached,long token,Bundle request,long deadline) throws Exception {
         if(token!=generation || player==null)return;
-        if(preloads.isBroken())throw new IOException("Native metadata preloader unavailable");
+        if(!cached)ensureForegroundPreloader();
+        OfficialPreloadCache<NativeMedia> queue=cached?preloads:foregroundPreloads;
+        awaitingPreloader=cached?preloader:foregroundPreloader;
+        if(queue.isBroken())throw new IOException("Native metadata preloader unavailable");
         if(SystemClock.elapsedRealtime()>=deadline)throw new IOException("Native metadata preparation timeout");
         if(!cached) {
-            // Other candidates retain their handles until REMOVED; do not allocate beyond the cache bound.
-            if(preloads.size()>=3) {
+            // A cancelled foreground item still owns its one slot until the exact native acknowledgement.
+            if(queue.size()>=1) {
                 worker.postDelayed(()->run(token,()->prepareNativeMedia(key,media,false,token,request,deadline)),20);
                 return;
             }
-            media.item=nativeItem(media.asset,0);media.preloadTarget=1;
-            if(!preloads.add(key,media))throw new IOException("Native metadata preload rejected");
+            if(media.item==null)media.item=nativeItem(media.asset,0);
+            media.preloadTarget=1;
+            if(item==media.item)item=null;
+            if(!queue.add(key,media))throw new IOException("Native metadata preload rejected");
+            android.util.Log.i("PiliPreload","metadata foreground queued; background="+(preloads==null?0:preloads.size()));
         }
         // Like the official Acquire path, take an existing task without waiting for its buffer target.
-        boolean taken=cached?preloads.take(key,ready->consumePreload(ready,token,request)):
-            preloads.takeReady(key,ready->consumePreload(ready,token,request));
+        boolean taken=cached?queue.take(key,ready->consumePreload(ready,token,request)):
+            queue.takeReady(key,ready->consumePreload(ready,token,request));
         if(!taken)throw new IOException("Native metadata handoff unavailable");
         // Detach shares the native queue with potentially slow closes of unused candidates.
         if(cached)preloads.discardExcept(key);
@@ -888,8 +909,11 @@ final class OfficialRuntime {
     void release() throws Exception {
         cancelResourceRefresh();
         ++generation;
-        if(awaitingPreload!=0 && preloads!=null)preloads.discardExcept(null);
-        awaitingPreload=0;awaitingOutput=null;prepared=false;wantedPlaying=false;awaitingMediaInfo=false;
+        if(awaitingPreload!=0) {
+            if(preloads!=null)preloads.discardExcept(null);
+            if(foregroundPreloads!=null)foregroundPreloads.discardExcept(null);
+        }
+        awaitingPreload=0;awaitingPreloader=null;awaitingOutput=null;prepared=false;wantedPlaying=false;awaitingMediaInfo=false;
         if(route!=null){route.stop();route=null;}
         if(player!=null){invoke(player,"release");player=null;}
         if(item!=null){releaseItem(item);item=null;}

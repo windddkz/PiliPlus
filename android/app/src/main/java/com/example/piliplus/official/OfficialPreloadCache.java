@@ -32,12 +32,17 @@ final class OfficialPreloadCache<T> {
     private final Backend<T> backend;
     private final Scheduler scheduler;
     private final LongSupplier now;
+    private final int capacity;
     private final Map<Long,Entry> entries = new LinkedHashMap<>();
     private long serial;
     private boolean broken;
 
     OfficialPreloadCache(Backend<T> backend, Scheduler scheduler, LongSupplier now) {
-        this.backend=backend; this.scheduler=scheduler; this.now=now;
+        this(backend,scheduler,now,3);
+    }
+    OfficialPreloadCache(Backend<T> backend, Scheduler scheduler, LongSupplier now, int capacity) {
+        if(capacity<1 || capacity>3)throw new IllegalArgumentException("Invalid preload capacity");
+        this.backend=backend; this.scheduler=scheduler; this.now=now; this.capacity=capacity;
     }
     boolean isBroken() { return broken; }
     int size() { return entries.size(); }
@@ -92,7 +97,7 @@ final class OfficialPreloadCache<T> {
                 backend.release(item); return false;
             }
         }
-        if (entries.size() >= 3) {
+        if (entries.size() >= capacity) {
             makeRoom();
             // Pending removals still own native handles and count against the bound.
             backend.release(item); return false;
