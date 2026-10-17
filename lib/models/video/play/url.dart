@@ -42,6 +42,8 @@ class PlayUrlModel {
   List<Durl>? durl;
   List<FormatItem>? supportFormats;
   Volume? volume;
+  // Local-only identity; never accepted from the server response.
+  String? officialPreloadToken;
 
   late int _lastPlayTime;
   int get lastPlayTime => _lastPlayTime;

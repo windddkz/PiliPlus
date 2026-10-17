@@ -76,6 +76,7 @@ public final class OfficialPlaybackService extends Service {
             switch (op) {
                 case "create": break;
                 case "warmUp": runtime.initialize(); break;
+                case "preload": runtime.preload(data); break;
                 case "open": runtime.open(data, surface); break;
                 case "surface": runtime.outputWindow(data); setSurface(data.getParcelable("surface")); break;
                 case "play": runtime.play(true); break;
@@ -87,7 +88,7 @@ public final class OfficialPlaybackService extends Service {
                 case "seek": runtime.seek(data.getLong("position", -1)); break;
                 case "speed": runtime.speed(data.getFloat("speed", Float.NaN)); break;
                 case "volume": runtime.volume(data.getFloat("volume", Float.NaN)); break;
-                case "close": runtime.release(); runtime.outputWindow(new Bundle()); setSurface(null); break;
+                case "close": runtime.close(); runtime.outputWindow(new Bundle()); setSurface(null); break;
                 default: throw new IllegalArgumentException("Unknown operation");
             }
             Bundle reply = new Bundle(); reply.putBoolean("ok", true); reply.putInt("pid", android.os.Process.myPid());

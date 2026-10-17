@@ -312,3 +312,30 @@ JNIEXPORT jint JNICALL Java_dev_piliplus_dspbridge_DspBridge_finishVideoTrace(JN
     if(rc||closed){fail(env,"Cannot save video trace");return -1;}
     return (jint)video_count;
 }
+
+#include "preload_interrupt_guards.h"
+JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_interruptPreload(JNIEnv *env,jclass cls,jlong handle) {
+ (void)cls;
+ void *lib=dlopen("libijk.so",RTLD_NOW|RTLD_LOCAL);
+ void *symbol=lib?dlsym(lib,"JNI_OnLoad"):NULL;Dl_info info;
+ if(getuid()%100000<10000||!symbol||!handle||!dladdr(symbol,&info))goto fail;
+ uintptr_t preload_base=(uintptr_t)info.dli_fbase;
+ if(memcmp((void *)(preload_base+0x1604fc),preload_getter_bytes,sizeof preload_getter_bytes)||
+    memcmp((void *)(preload_base+0x193034),preload_interrupt_bytes,sizeof preload_interrupt_bytes)||
+    memcmp((void *)(preload_base+0x1f3848),preload_retain_bytes,sizeof preload_retain_bytes)||
+    memcmp((void *)(preload_base+0x1f38dc),preload_release_bytes,sizeof preload_release_bytes))goto fail;
+ void *item=*(void **)(uintptr_t)handle;
+ if(!item)goto fail;
+ void **(*getDirector)(void *)=(void *)(preload_base+0x1604fc);
+ void (*retain)(void *,void *)=(void *)(preload_base+0x1f3848);
+ void (*release)(void *,void *)=(void *)(preload_base+0x1f38dc);
+ void (*interrupt)(void *,unsigned char)=(void *)(preload_base+0x193034);
+ void *director=*getDirector(item);
+ if(!director)goto fail;
+ // Match the original read looper's ownership around its IO-interrupt call.
+ retain(director,&director);interrupt(director,1);release(director,&director);
+ dlclose(lib);return;
+fail:
+ if(lib)dlclose(lib);
+ (*env)->ThrowNew(env,(*env)->FindClass(env,"java/lang/IllegalStateException"),"Original preloader interrupt runtime mismatch");
+}

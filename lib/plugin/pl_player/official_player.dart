@@ -120,11 +120,51 @@ class OfficialPlayer extends PlatformPlayer {
     return pending;
   }
 
-  static Future<void> _warmUpAndRelease() async {
+  static Future<void> preloadWhenIdle(
+    NetworkSource source, {
+    required Duration position,
+    required String userAgent,
+    required String referer,
+  }) async {
+    while (_idleWarmup != null) {
+      final pending = _idleWarmup!;
+      try {
+        await pending;
+      } catch (_) {}
+    }
+    if (_creatingPlayers != 0 || _livePlayers.isNotEmpty) return;
+    final pending = _idleWarmup = _warmUpAndRelease(
+      preload: source,
+      position: position,
+      userAgent: userAgent,
+      referer: referer,
+    );
+    void clear() {
+      if (identical(_idleWarmup, pending)) _idleWarmup = null;
+    }
+
+    unawaited(pending.then((_) => clear(), onError: (Object _) => clear()));
+    await pending;
+  }
+
+  static Future<void> _warmUpAndRelease({
+    NetworkSource? preload,
+    Duration position = Duration.zero,
+    String userAgent = '',
+    String referer = '',
+  }) async {
     OfficialPlayer? player;
     try {
       player = await _create((reason) => Future.error(StateError(reason)));
       await player.warmUp();
+      if (preload != null) {
+        await player._send('preload', {
+          ..._sourceArguments(preload, false),
+          'position': position.inMilliseconds,
+          'userAgent': userAgent,
+          'referer': referer,
+        });
+      }
     } finally {
       await player?.dispose();
     }
@@ -220,6 +260,8 @@ class OfficialPlayer extends PlatformPlayer {
         : source.videoSource,
     if (!audioOnly) 'audio': source.audioSource,
     if (source is NetworkSource) ...{
+      if (source.officialPreloadToken != null)
+        'preloadToken': source.officialPreloadToken,
       'sourceTrack': audioOnly && source.audioSource != null
           ? source.audioTrack?.forSource(source.audioSource)
           : source.videoTrack?.forSource(source.videoSource),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -19,6 +20,11 @@ import 'package:PiliPlus/models/model_hot_video_item.dart';
 import 'package:PiliPlus/models/model_rec_video_item.dart';
 import 'package:PiliPlus/models/pgc_lcf.dart';
 import 'package:PiliPlus/models/video/play/url.dart';
+import 'package:PiliPlus/models/video/play/selection.dart';
+import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
+import 'package:PiliPlus/plugin/pl_player/official_player.dart';
+import 'package:PiliPlus/utils/connectivity_utils.dart';
+import 'package:PiliPlus/utils/video_utils.dart';
 import 'package:PiliPlus/models_new/pgc/pgc_rank/pgc_rank_item_model.dart';
 import 'package:PiliPlus/models_new/popular/popular_precious/data.dart';
 import 'package:PiliPlus/models_new/popular/popular_series_list/list.dart';
@@ -51,6 +57,7 @@ import 'package:protobuf/protobuf.dart';
 /// view层根据 status 判断渲染逻辑
 abstract final class VideoHttp {
   static final _prefetch = PlayUrlPrefetch();
+  static int _preloadSerial = 0;
 
   static bool get prefetchEnabled =>
       Platform.isAndroid && Pref.officialAudioBackend && Pref.preInitPlayer;
@@ -69,26 +76,86 @@ abstract final class VideoHttp {
     await _prefetch.preload(account, key, () async {
       final cancel = CancelToken();
       try {
-        return await videoUrl(
-          bvid: bvid,
-          cid: cid,
-          qn: VideoQuality.hdrVivid.code,
-          tryLook: key.tryLook,
-          voiceBalance: key.voiceBalance,
-          videoType: .ugc,
-          prefetchAccount: account,
-          cancelToken: cancel,
-        ).timeout(
-          const Duration(seconds: 2),
-          onTimeout: () {
-            cancel.cancel('prefetch expired');
-            return const Error('prefetch expired');
-          },
-        );
+        final result =
+            await videoUrl(
+              bvid: bvid,
+              cid: cid,
+              qn: VideoQuality.hdrVivid.code,
+              tryLook: key.tryLook,
+              voiceBalance: key.voiceBalance,
+              videoType: .ugc,
+              prefetchAccount: account,
+              cancelToken: cancel,
+            ).timeout(
+              const Duration(seconds: 2),
+              onTimeout: () {
+                cancel.cancel('prefetch expired');
+                return const Error('prefetch expired');
+              },
+            );
+        if (result case Success(:final response)) {
+          unawaited(_preloadMedia(response, account));
+        }
+        return result;
       } finally {
         cancel.cancel('prefetch finished');
       }
     });
+  }
+
+  static Future<void> _preloadMedia(
+    PlayUrlModel response,
+    Account account,
+  ) async {
+    try {
+      if (!prefetchEnabled || !identical(account, Accounts.video)) return;
+      final selected = DashSelection.select(
+        response,
+        videoQuality: Pref.defaultVideoQa,
+        audioQuality: Pref.defaultAudioQa,
+        preferredCodecs: Pref.preferCodecs,
+      );
+      final audio = selected.audio;
+      if (audio == null) return;
+      final videoUrl = VideoUtils.getCdnUrl(selected.video.playUrls);
+      final audioUrl = VideoUtils.getCdnUrl(audio.playUrls, isAudio: true);
+      final token =
+          '${DateTime.now().microsecondsSinceEpoch}_${++_preloadSerial}';
+      response.officialPreloadToken = token;
+      final source = NetworkSource(
+        videoSource: videoUrl,
+        audioSource: audioUrl,
+        officialPreloadToken: token,
+        videoTrack: DashTrack(
+          source: videoUrl,
+          id: selected.video.id,
+          bandwidth: selected.video.bandWidth,
+          urls: selected.video.playUrls,
+        ),
+        audioTrack: DashTrack(
+          source: audioUrl,
+          id: audio.id,
+          bandwidth: audio.bandWidth,
+          urls: audio.playUrls,
+        ),
+      );
+      if (!await ConnectivityUtils.isWiFi ||
+          !prefetchEnabled ||
+          !identical(account, Accounts.video)) {
+        return;
+      }
+      await OfficialPlayer.preloadWhenIdle(
+        source,
+        position: Duration(milliseconds: response.lastPlayTime),
+        userAgent: BrowserUa.pc,
+        referer: HttpString.baseUrl,
+      );
+    } catch (error) {
+      // A failed optional preload must not delay or discard the playurl response.
+      if (kDebugMode) {
+        debugPrint('Official media preload skipped: ${error.runtimeType}');
+      }
+    }
   }
 
   static Future<PlayUrlModel?> takePrefetchedVideoUrl(PlayUrlKey key) async {

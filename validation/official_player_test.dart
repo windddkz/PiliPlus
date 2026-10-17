@@ -46,6 +46,113 @@ void main() {
   Future<OfficialPlayer> create() => OfficialPlayer.create(
     (reason) => throw StateError('Unexpected fallback: $reason'),
   );
+  NetworkSource preloadedSource() => NetworkSource(
+    videoSource: 'https://example.invalid/video',
+    audioSource: 'https://example.invalid/audio',
+    officialPreloadToken: 'local_173',
+    videoTrack: DashTrack(
+      source: 'https://example.invalid/video',
+      id: 80,
+      bandwidth: 1234,
+      urls: const ['https://example.invalid/video'],
+    ),
+    audioTrack: DashTrack(
+      source: 'https://example.invalid/audio',
+      id: 30251,
+      bandwidth: 456,
+      urls: const ['https://example.invalid/audio'],
+    ),
+  );
+  Future<void> preload() => OfficialPlayer.preloadWhenIdle(
+    preloadedSource(),
+    position: const Duration(milliseconds: 12375),
+    userAgent: 'test-agent',
+    referer: 'https://example.invalid/',
+  );
+  test('media preload hands off the session before real create and queued preloads yield', () async {
+    final queued = Completer<void>();
+    messenger.setMockMethodCallHandler(commands, (call) async {
+      calls.add(call);
+      return switch (call.method) {
+        'availability' => {'available': true},
+        'create' => {'session': 7},
+        'preload' => queued.future,
+        _ => null,
+      };
+    });
+    final first = preload();
+    await Future<void>.delayed(Duration.zero);
+    final second = preload();
+    final playing = create();
+    await Future<void>.delayed(Duration.zero);
+    expect(calls.map((c) => c.method), [
+      'availability',
+      'create',
+      'warmUp',
+      'preload',
+    ]);
+    final args = calls.last.arguments as Map;
+    expect(args['preloadToken'], 'local_173');
+    expect(args['position'], 12375);
+    expect(args['audioTrack']['id'], 30251);
+    expect(args['userAgent'], 'test-agent');
+    queued.complete();
+    await Future.wait([first, second]);
+    final player = await playing;
+    expect(calls.map((c) => c.method), [
+      'availability',
+      'create',
+      'warmUp',
+      'preload',
+      'dispose',
+      'availability',
+      'create',
+    ]);
+    await player.dispose();
+  });
+  test('media preload does not steal an active player', () async {
+    final player = await create();
+    await preload();
+    expect(calls.map((c) => c.method), ['availability', 'create']);
+    await player.dispose();
+  });
+  test(
+    'failed preload releases its session and does not prevent normal creation',
+    () async {
+      messenger.setMockMethodCallHandler(commands, (call) async {
+        calls.add(call);
+        return switch (call.method) {
+          'availability' => {'available': true},
+          'create' => {'session': 7},
+          'preload' => throw PlatformException(code: 'native_command_failed'),
+          _ => null,
+        };
+      });
+      await expectLater(preload(), throwsA(isA<PlatformException>()));
+      expect(calls.last.method, 'dispose');
+      final player = await create();
+      await player.dispose();
+    },
+  );
+  test(
+    'normal open forwards the same local token and track metadata',
+    () async {
+      final player = await create();
+      final prepared = player.openSource(
+        preloadedSource(),
+        userAgent: 'test-agent',
+        referer: 'https://example.invalid/',
+        audioOnly: false,
+      );
+      await Future<void>.delayed(Duration.zero);
+      final args = calls.firstWhere((c) => c.method == 'open').arguments as Map;
+      expect(args['preloadToken'], 'local_173');
+      expect(args['audioTrack']['id'], 30251);
+      await emit({'event': 'prepared'});
+      await prepared;
+      await player.dispose();
+    },
+  );
   test(
     'idle warm-up releases before real create, without opening media',
     () async {

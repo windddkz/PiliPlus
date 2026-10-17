@@ -211,6 +211,12 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
         }
         Bundle data = new Bundle();
         switch (call.method) {
+            case "preload":
+                if(closing){result.error("closing","Player session is closing",null);return;}
+                putSources(call,data);
+                data.putString("preloadToken",call.argument("preloadToken"));
+                data.putLong("position",number(call,"position",0).longValue());
+                break;
             case "open":
                 if(closing || waitingOpen!=null){result.error("open_pending","Another video open is pending",null);return;}
                 if(BuildConfig.DEBUG)data.putBoolean("videoTrace",Boolean.TRUE.equals(call.argument("videoTrace")));
@@ -219,6 +225,7 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                 data.putBoolean("flipX", Boolean.TRUE.equals(call.argument("flipX")));
                 data.putBoolean("flipY", Boolean.TRUE.equals(call.argument("flipY")));
                 putSources(call,data);
+                data.putString("preloadToken",call.argument("preloadToken"));
                 data.putLong("position", number(call, "position", 0).longValue());
                 data.putLong("load", number(call, "load", 1).longValue());
                 data.putFloat("speed", number(call, "speed", 1).floatValue());

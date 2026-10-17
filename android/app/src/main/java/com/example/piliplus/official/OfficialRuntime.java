@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.*;
 
 /** One original player owns audio, video and timing in our dedicated process. */
 final class OfficialRuntime {
@@ -24,6 +25,21 @@ final class OfficialRuntime {
     private final Events events;
     private DexClassLoader loader;
     private Object player, item, externalRenderer, externalOutput;
+    private Object preloader;
+    private OfficialPreloadCache<NativeMedia> preloads;
+    private final ThreadPoolExecutor preloadProbeWorker=new ThreadPoolExecutor(1,1,0L,TimeUnit.MILLISECONDS,
+        new ArrayBlockingQueue<>(2),r->new Thread(r,"official-preload-probe"));
+    private final Map<String,PreloadProbe> preloadProbes=new HashMap<>();
+    private long preloadEpoch, awaitingPreload;
+    private static final class NativeMedia {
+        final Object asset; final boolean hdr; Object item;
+        NativeMedia(Object asset,boolean hdr){this.asset=asset;this.hdr=hdr;}
+    }
+    private static final class PreloadProbe {
+        final long epoch; Future<?> future;
+        PreloadProbe(long epoch){this.epoch=epoch;}
+    }
+
     private OfficialAudioRoute route;
     private Surface outputSurface;
     private SurfaceControl outputParent;
@@ -264,6 +280,154 @@ final class OfficialRuntime {
             return cls("kotlin.Unit").getField("INSTANCE").get(null);
         });
     }
+
+    private NativeMedia media(Bundle request,DashSource[] tracks) throws Exception {
+        String source=request.getString("source"),audio=request.getString("audio");
+        String userAgent=request.getString("userAgent","PiliPlus"),referer=request.getString("referer","https://www.bilibili.com/");
+        OfficialStream sourceTrack=streamInfo(request.getBundle("sourceTrack"),source);
+        OfficialStream audioTrack=streamInfo(request.getBundle("audioTrack"),audio);
+        boolean isLive=request.getBoolean("isLive",false);
+        Map<String,String> options=new HashMap<>();options.put("user_agent",userAgent);options.put("referer",referer);
+            Object asset;
+            boolean hdr=false;
+            if(audio!=null&&!audio.isEmpty()) {
+                if(source.startsWith("/")!=audio.startsWith("/"))throw new IllegalArgumentException("Mixed local/network DASH");
+                if(tracks==null){stage("dash_probe");
+                tracks=DashSource.probePair(source,sourceTrack==null?Collections.emptyList():sourceTrack.backups,
+                    audio,audioTrack==null?Collections.emptyList():audioTrack.backups,userAgent,referer);}
+                DashSource video=tracks[0],sound=tracks[1];
+                hdr=video.hdr;
+                if(!Arrays.asList("H264","HEVC","AV1").contains(video.codec)||!Arrays.asList("AAC","FLAC","AC3","EAC3").contains(sound.codec))throw new IllegalArgumentException("DASH track types do not match");
+                Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField(source.startsWith("/")?"OFFLINE":"VOD").get(null);
+                // Local or manually supplied tracks retain opaque adapter IDs when metadata is unavailable.
+                int videoId=sourceTrack==null?80:sourceTrack.id,audioId=audioTrack==null?30280:audioTrack.id;
+                asset=construct("com.bilibili.ijk.media.MediaAsset$Dash",audioId,videoId,Collections.singletonList(dashStream(video,0,videoId,sourceTrack)),Collections.singletonList(dashStream(sound,1,audioId,audioTrack)),scheme,options,null);
+            } else {
+                // VOD and LIVE enable their respective original HTTP recovery hooks.
+                Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField(isLive?"LIVE":sourceTrack!=null&&!source.startsWith("/")?"VOD":"NORMAL").get(null);
+                asset=construct("com.bilibili.ijk.media.MediaAsset$Normal",source,sourceTrack==null?Collections.emptyList():sourceTrack.backups,scheme,options,null);
+            }
+
+        return new NativeMedia(asset,hdr);
+    }
+    private Object nativeItem(Object asset,long position) throws Exception {
+        Object render=cls("com.bilibili.ijk.player.RenderPath").getField("Direct").get(null);
+        Object unit=cls("kotlin.time.DurationUnit").getField("MILLISECONDS").get(null);
+        long duration=(Long)invoke(cls("kotlin.time.DurationKt"),"toDuration",position,unit);
+        Object descriptor=construct("com.bilibili.ijk.player.PlayerItem",asset,duration,false,0,null,null,0,0,render,252,null);
+        return construct("com.bilibili.ijk.player.AndroidNativePlayerItem",descriptor);
+    }
+    private String preloadKey(Bundle request) throws Exception {
+        String token=request.getString("preloadToken");if(token==null)return null;
+        if(!token.matches("[A-Za-z0-9_-]{1,80}"))throw new IllegalArgumentException("Invalid preload token");
+        JSONObject key=new JSONObject();key.put("token",token);key.put("position",request.getLong("position",0));
+        for(String name:new String[]{"source","audio","userAgent","referer"})key.put(name,request.getString(name,""));
+        for(String name:new String[]{"sourceTrack","audioTrack"}){
+            Bundle info=request.getBundle(name);if(info==null)continue;
+            JSONObject track=new JSONObject();track.put("source",info.getString("source"));track.put("id",info.getInt("id"));
+            track.put("bandwidth",info.getInt("bandwidth"));track.put("backups",new org.json.JSONArray(info.getStringArrayList("backups")));
+            key.put(name,track);
+        }
+        return hash(key.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+    private void preloadFailure(Exception error) {
+        if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.w("PiliPreload","disabled: "+error.getClass().getSimpleName());
+        if(awaitingPreload!=0 && awaitingPreload==generation)fail(error);
+    }
+    private void preloadResult(String method,Object... args) throws Exception {
+        if(((Number)invoke(preloader,method,args)).intValue()!=0)throw new IOException("Native preload command rejected");
+    }
+    private void ensurePreloader() throws Exception {
+        if(preloads!=null)return;
+        preloader=construct("com.bilibili.ijk.preload.IJKNativePreloader");
+        String add=Arrays.stream(preloader.getClass().getDeclaredMethods()).map(Method::getName)
+            .filter(name->name.startsWith("addTask-")).findFirst().orElseThrow(()->new NoSuchMethodException("addTask"));
+        preloads=new OfficialPreloadCache<>(new OfficialPreloadCache.Backend<NativeMedia>() {
+            public void add(long request,long task,NativeMedia media) throws Exception {preloadResult(add,request,task,media.item,(byte)50,2000L);}
+            public void detach(long request,long task,NativeMedia media) throws Exception {preloadResult("detachTask",request,task,media.item);}
+            public void interrupt(NativeMedia media) throws Exception {
+                Object handle=invoke(media.item,"nativePtrOrNull$srcs_base_ijk_ijk_library_android");
+                if(!(handle instanceof Long))throw new IllegalStateException("Missing native preload item");
+                bridge("interruptPreload",handle);
+            }
+            public void remove(long request,long task,NativeMedia media) throws Exception {preloadResult("removeTask",request,task,media.item);}
+            public void release(NativeMedia media) throws Exception {invoke(media.item,"release");}
+            public void failed(Exception error){preloadFailure(error);}
+        },(delay,action)->worker.postDelayed(action,delay),SystemClock::elapsedRealtime);
+        Object cb=Proxy.newProxyInstance(loader,new Class<?>[]{cls("kotlin.jvm.functions.Function1")},(proxy,method,args)->{
+            switch(method.getName()){
+                case "toString":return "PiliPlusPreloader";
+                case "hashCode":return System.identityHashCode(proxy);
+                case "equals":return proxy==args[0];
+                case "invoke":
+                    Object event=args[0];worker.post(()->{
+                        try {
+                            String type=invoke(event,"getType").toString();int error=(Integer)invoke(event,"getError");
+                            long request=(Long)invoke(event,"getRequestId"),task=(Long)invoke(event,"getTaskId");
+                            preloads.event(request,task,type,error);
+                            if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.d("PiliPreload",type+" request="+request+" task="+task+" error="+error+" retained="+preloads.size());
+                        } catch(Exception error){preloadFailure(error);}
+                    });
+                    return cls("kotlin.Unit").getField("INSTANCE").get(null);
+                default:throw new UnsupportedOperationException(method.getName());
+            }
+        });
+        invoke(preloader,"setEventCallback",cb);
+    }
+    void preload(Bundle data) throws Exception {
+        initialize();String key=preloadKey(data);
+        if(key==null || data.getLong("position",0)<0)throw new IllegalArgumentException("Invalid preload request");
+        String source=data.getString("source"),audio=data.getString("audio");
+        OfficialStream video=streamInfo(data.getBundle("sourceTrack"),source),sound=streamInfo(data.getBundle("audioTrack"),audio);
+        if(video==null || sound==null)throw new IllegalArgumentException("Preload requires two validated DASH streams");
+        String ua=data.getString("userAgent","PiliPlus"),referer=data.getString("referer","https://www.bilibili.com/");
+        for(String header:new String[]{ua,referer})if(header.length()>4096||header.contains("\r")||header.contains("\n"))throw new IllegalArgumentException("Invalid source header");
+        if(player!=null)return;
+        ensurePreloader();
+        if(preloads.isBroken() || preloads.size()+preloadProbes.size()>=3 || preloadProbes.containsKey(key) || preloads.peek(key)!=null)return;
+        Bundle request=new Bundle(data);PreloadProbe probe=new PreloadProbe(preloadEpoch);preloadProbes.put(key,probe);
+        if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.d("PiliPreload","probe queued");
+        try {probe.future=preloadProbeWorker.submit(()->{
+            try {
+                // One bounded background I/O task; foreground opens never wait for these probes.
+                DashSource[] tracks={DashSource.probe(source,video.backups,ua,referer),DashSource.probe(audio,sound.backups,ua,referer)};
+                worker.post(()->{
+                    if(preloadProbes.get(key)!=probe)return;
+                    preloadProbes.remove(key);
+                    if(probe.epoch!=preloadEpoch || player!=null || preloads.isBroken())return;
+                    try {NativeMedia media=media(request,tracks);media.item=nativeItem(media.asset,request.getLong("position",0));preloads.add(key,media);}
+                    catch(Exception error){preloadFailure(error);}
+                });
+            } catch(Exception error){worker.post(()->{
+                if(preloadProbes.get(key)==probe){preloadProbes.remove(key);if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.d("PiliPreload","probe skipped: "+error.getClass().getSimpleName());}
+            });}
+        });} catch(RejectedExecutionException full){preloadProbes.remove(key);}
+    }
+    private void cancelPreloadProbes() {
+        ++preloadEpoch;
+        for(PreloadProbe probe:preloadProbes.values()){
+            probe.future.cancel(true);preloadProbeWorker.remove((Runnable)probe.future);
+        }
+        preloadProbes.clear();
+    }
+    void close() throws Exception {
+        release();
+        // Unconfirmed native ownership is reclaimed by the existing failed-close process barrier.
+        if(preloads!=null && preloads.isBroken())throw new IOException("Preload stop unconfirmed");
+    }
+    private void useItem(Object next,long token,Bundle request) throws Exception {
+        item=next;awaitingPreload=0;resourceRefresh.open();
+        AtomicInteger resourceUpdates=new AtomicInteger();
+        invoke(item,"setResourceUpdateListener",resourceListener(token,new Bundle(request),resourceUpdates));
+        if(!Boolean.TRUE.equals(invoke(player,"switchItem",item)))throw new IOException("switchItem rejected");
+        route.start();describeRoute("route_selected");
+        worker.postDelayed(()->run(token,()->{
+            if(prepared)return;
+            if(resourceUpdates.get()>0)failResource();
+            else {release();throw new IOException("Preparation timeout");}
+        }),20000);
+    }
+
     void open(Bundle request,Surface surface) throws Exception {
         stage("validate");
         String source=request.getString("source"),audio=request.getString("audio");
@@ -278,7 +442,7 @@ final class OfficialRuntime {
         int endpoint=request.getInt("endpoint",0),virtualizer=request.getInt("virtualizer",1);
         if(!Float.isFinite(rate)||rate<.25f||rate>4||!Float.isFinite(gain)||gain<0||gain>1||position<0||endpoint<0||endpoint>2||virtualizer<0||virtualizer>1)
             throw new IllegalArgumentException("Invalid playback controls");
-        release();load=request.getLong("load",1);stage("runtime");initialize();
+        cancelPreloadProbes();release();load=request.getLong("load",1);stage("runtime");initialize();
         long token=++generation;speed=rate;volume=gain;startPosition=position;wantedPlaying=request.getBoolean("play",false);
         openRequest=new Bundle(request);outputSurface=surface;loudnessMode=request.getString("loudnessMode","off");
         Bundle sceneBundle=request.getBundle("loudnessScenes");Map<String,String> scenes=null;
@@ -303,26 +467,12 @@ final class OfficialRuntime {
                 invoke(player,(String)binding[0],callback((Integer)binding[1],(String)binding[2],token));
             boolean audioOnly=request.getBoolean("audioOnly",false);
             invoke(player,"setAudioOnly",audioOnly);invoke(player,"setVolume",volume);speed(speed);
-            Map<String,String> options=new HashMap<>();options.put("user_agent",userAgent);options.put("referer",referer);
-            Object asset;
-            boolean directHdr=false;
-            if(audio!=null&&!audio.isEmpty()) {
-                if(source.startsWith("/")!=audio.startsWith("/"))throw new IllegalArgumentException("Mixed local/network DASH");
-                stage("dash_probe");
-                DashSource[] tracks=DashSource.probePair(source,sourceTrack==null?Collections.emptyList():sourceTrack.backups,
-                    audio,audioTrack==null?Collections.emptyList():audioTrack.backups,userAgent,referer);
-                DashSource video=tracks[0],sound=tracks[1];
-                directHdr=video.hdr && Build.VERSION.SDK_INT>=33 && outputParent!=null;
-                if(!Arrays.asList("H264","HEVC","AV1").contains(video.codec)||!Arrays.asList("AAC","FLAC","AC3","EAC3").contains(sound.codec))throw new IllegalArgumentException("DASH track types do not match");
-                Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField(source.startsWith("/")?"OFFLINE":"VOD").get(null);
-                // Local or manually supplied tracks retain opaque adapter IDs when metadata is unavailable.
-                int videoId=sourceTrack==null?80:sourceTrack.id,audioId=audioTrack==null?30280:audioTrack.id;
-                asset=construct("com.bilibili.ijk.media.MediaAsset$Dash",audioId,videoId,Collections.singletonList(dashStream(video,0,videoId,sourceTrack)),Collections.singletonList(dashStream(sound,1,audioId,audioTrack)),scheme,options,null);
-            } else {
-                // VOD and LIVE enable their respective original HTTP recovery hooks.
-                Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField(isLive?"LIVE":sourceTrack!=null&&!source.startsWith("/")?"VOD":"NORMAL").get(null);
-                asset=construct("com.bilibili.ijk.media.MediaAsset$Normal",source,sourceTrack==null?Collections.emptyList():sourceTrack.backups,scheme,options,null);
-            }
+            String cacheKey=preloadKey(request);
+            if(preloads!=null)preloads.discardExcept(cacheKey);
+            NativeMedia cached=preloads==null?null:preloads.peek(cacheKey);
+            if(cached==null && preloads!=null)preloads.discard(cacheKey);
+            NativeMedia media=cached==null?media(request,null):cached;
+            boolean directHdr=media.hdr && Build.VERSION.SDK_INT>=33 && outputParent!=null;
             if(!audioOnly&&surface!=null&&!directHdr) {
                 invoke(cls("tv.danmaku.ijk.media.player.render.core.BiliRenderContext"),"init",context);
                 cls("tv.danmaku.ijk.media.player.render.IjkExternalRenderThread").getField("EXTERNAL_RENDER_TYPE").setInt(null,0);
@@ -354,19 +504,18 @@ final class OfficialRuntime {
             }
             Bundle display=new Bundle();display.putString("event","display_path");display.putBoolean("directHdr",!audioOnly&&directHdr);emit(display);
             stage("prepare");
-            Object render=cls("com.bilibili.ijk.player.RenderPath").getField("Direct").get(null);
-            Object descriptor=construct("com.bilibili.ijk.player.PlayerItem",asset,0L,false,0,null,null,0,0,render,254,null);
-            item=construct("com.bilibili.ijk.player.AndroidNativePlayerItem",descriptor);
-            resourceRefresh.open();
-            AtomicInteger resourceUpdates=new AtomicInteger();
-            invoke(item,"setResourceUpdateListener",resourceListener(token,new Bundle(request),resourceUpdates));
-            if(!Boolean.TRUE.equals(invoke(player,"switchItem",item)))throw new IOException("switchItem rejected");
-            route.start();describeRoute("route_selected");
-            worker.postDelayed(()->run(token,()->{
-                if(prepared)return;
-                if(resourceUpdates.get()>0)failResource();
-                else {release();throw new IOException("Preparation timeout");}
-            }),20000);
+            if(cached!=null){
+                awaitingPreload=token;
+                if(preloads.take(cacheKey,ready->{
+                    if(token!=generation || player==null){try{invoke(ready.item,"release");}catch(Exception error){preloadFailure(error);}return;}
+                    run(token,()->{
+                        useItem(ready.item,token,request);
+                        if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.d("PiliPreload","consumed same native item");
+                    });
+                }))return;
+                awaitingPreload=0;
+            }
+            useItem(nativeItem(media.asset,0),token,request);
         } catch(Exception | LinkageError error) {try{release();}catch(Exception | LinkageError cleanup){error.addSuppressed(cleanup);}throw error;}
     }
     private static OfficialStream streamInfo(Bundle info,String source) {
@@ -547,7 +696,7 @@ final class OfficialRuntime {
     }
     void release() throws Exception {
         cancelResourceRefresh();
-        ++generation;prepared=false;wantedPlaying=false;
+        ++generation;awaitingPreload=0;prepared=false;wantedPlaying=false;
         if(route!=null){route.stop();route=null;}
         if(player!=null){invoke(player,"release");player=null;}
         if(item!=null){invoke(item,"release");item=null;}

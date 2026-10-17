@@ -12,6 +12,7 @@ sealed class DataSource {
 }
 
 class NetworkSource extends DataSource {
+  final String? officialPreloadToken;
   final DashTrack? videoTrack;
   final DashTrack? audioTrack;
   final Future<NetworkSource?> Function(NetworkSource source)? refresh;
@@ -20,6 +21,7 @@ class NetworkSource extends DataSource {
   NetworkSource({
     required super.videoSource,
     required super.audioSource,
+    this.officialPreloadToken,
     this.videoTrack,
     this.audioTrack,
     this.refresh,
