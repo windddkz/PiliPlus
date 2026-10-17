@@ -36,8 +36,14 @@ final class OfficialRuntime {
         NativeMedia(Object asset,boolean hdr){this.asset=asset;this.hdr=hdr;}
     }
     private static final class PreloadProbe {
-        final long epoch; Future<?> future;
+        final long epoch; Future<DashSource[]> future;
         PreloadProbe(long epoch){this.epoch=epoch;}
+        DashSource[] await() throws InterruptedIOException {
+            try {return future.get(300,TimeUnit.MILLISECONDS);}
+            catch(ExecutionException | CancellationException | TimeoutException unavailable){return null;}
+            catch(InterruptedException interrupted){Thread.currentThread().interrupt();throw new InterruptedIOException("Preload probe wait interrupted");}
+            finally {future.cancel(true);}
+        }
     }
 
     private OfficialAudioRoute route;
@@ -389,7 +395,7 @@ final class OfficialRuntime {
         if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.d("PiliPreload","probe queued");
         try {probe.future=preloadProbeWorker.submit(()->{
             try {
-                // Prepare both tracks together; foreground opens cancel this background task.
+                // Formal playback may take over this task using the exact preload identity.
                 DashSource[] tracks=DashSource.probePair(source,video.backups,audio,sound.backups,ua,referer);
                 worker.post(()->{
                     if(preloadProbes.get(key)!=probe)return;
@@ -398,17 +404,20 @@ final class OfficialRuntime {
                     try {NativeMedia media=media(request,tracks);media.item=nativeItem(media.asset,request.getLong("position",0));preloads.add(key,media);}
                     catch(Exception error){preloadFailure(error);}
                 });
+                return tracks;
             } catch(Exception error){worker.post(()->{
                 if(preloadProbes.get(key)==probe){preloadProbes.remove(key);if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.d("PiliPreload","probe skipped: "+error.getClass().getSimpleName());}
-            });}
+            });throw error;}
         });} catch(RejectedExecutionException full){preloadProbes.remove(key);}
     }
-    private void cancelPreloadProbes() {
+    private PreloadProbe takePreloadProbe(String key) {
         ++preloadEpoch;
+        PreloadProbe selected=preloadProbes.remove(key);
         for(PreloadProbe probe:preloadProbes.values()){
             probe.future.cancel(true);preloadProbeWorker.remove((Runnable)probe.future);
         }
         preloadProbes.clear();
+        return selected;
     }
     void close() throws Exception {
         release();
@@ -442,7 +451,10 @@ final class OfficialRuntime {
         int endpoint=request.getInt("endpoint",0),virtualizer=request.getInt("virtualizer",1);
         if(!Float.isFinite(rate)||rate<.25f||rate>4||!Float.isFinite(gain)||gain<0||gain>1||position<0||endpoint<0||endpoint>2||virtualizer<0||virtualizer>1)
             throw new IllegalArgumentException("Invalid playback controls");
-        cancelPreloadProbes();release();load=request.getLong("load",1);stage("runtime");initialize();
+        String cacheKey=preloadKey(request);
+        PreloadProbe pendingProbe=takePreloadProbe(cacheKey);
+        try {
+        release();load=request.getLong("load",1);stage("runtime");initialize();
         long token=++generation;speed=rate;volume=gain;startPosition=position;wantedPlaying=request.getBoolean("play",false);
         openRequest=new Bundle(request);outputSurface=surface;loudnessMode=request.getString("loudnessMode","off");
         Bundle sceneBundle=request.getBundle("loudnessScenes");Map<String,String> scenes=null;
@@ -467,11 +479,15 @@ final class OfficialRuntime {
                 invoke(player,(String)binding[0],callback((Integer)binding[1],(String)binding[2],token));
             boolean audioOnly=request.getBoolean("audioOnly",false);
             invoke(player,"setAudioOnly",audioOnly);invoke(player,"setVolume",volume);speed(speed);
-            String cacheKey=preloadKey(request);
             if(preloads!=null)preloads.discardExcept(cacheKey);
             NativeMedia cached=preloads==null?null:preloads.peek(cacheKey);
             if(cached==null && preloads!=null)preloads.discard(cacheKey);
-            NativeMedia media=cached==null?media(request,null):cached;
+            DashSource[] tracks=null;
+            if(cached==null && pendingProbe!=null){
+                stage("dash_probe");tracks=pendingProbe.await();
+                if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.d("PiliPreload",tracks==null?"probe takeover missed":"probe takeover reused");
+            }
+            NativeMedia media=cached==null?media(request,tracks):cached;
             boolean directHdr=media.hdr && Build.VERSION.SDK_INT>=33 && outputParent!=null;
             if(!audioOnly&&surface!=null&&!directHdr) {
                 invoke(cls("tv.danmaku.ijk.media.player.render.core.BiliRenderContext"),"init",context);
@@ -517,6 +533,9 @@ final class OfficialRuntime {
             }
             useItem(nativeItem(media.asset,0),token,request);
         } catch(Exception | LinkageError error) {try{release();}catch(Exception | LinkageError cleanup){error.addSuppressed(cleanup);}throw error;}
+        } finally {
+            if(pendingProbe!=null){pendingProbe.future.cancel(true);preloadProbeWorker.remove((Runnable)pendingProbe.future);}
+        }
     }
     private static OfficialStream streamInfo(Bundle info,String source) {
         return info==null?null:new OfficialStream(source,info.get("source"),info.get("id"),info.get("bandwidth"),info.get("backups"));

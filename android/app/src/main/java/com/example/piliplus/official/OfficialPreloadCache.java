@@ -48,7 +48,7 @@ final class OfficialPreloadCache<T> {
     T peek(String key) {
         if (broken || key == null) return null;
         for (Entry entry : entries.values()) {
-            if (entry.key.equals(key) && entry.state == State.READY &&
+            if (entry.key.equals(key) && (entry.state == State.ADDING || entry.state == State.READY) &&
                     now.getAsLong()-entry.created < 30000) return entry.item;
         }
         return null;
@@ -91,10 +91,11 @@ final class OfficialPreloadCache<T> {
         if (broken) return false;
         for (Entry entry : entries.values()) {
             if (!entry.key.equals(key)) continue;
-            if (entry.state != State.READY || now.getAsLong()-entry.created >= 30000) {
+            if ((entry.state != State.ADDING && entry.state != State.READY) || now.getAsLong()-entry.created >= 30000) {
                 if (entry.state == State.ADDING || entry.state == State.READY) remove(entry);
                 return false;
             }
+            // An in-progress item is reusable only after native confirms exclusive ownership.
             entry.state=State.DETACHING; entry.consumer=consumer; entry.movement=++serial;
             try { backend.detach(entry.movement,entry.task,entry.item); }
             catch (Exception error) { fail(error); }

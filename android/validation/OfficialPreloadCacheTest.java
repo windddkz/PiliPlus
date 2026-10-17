@@ -23,9 +23,9 @@ public final class OfficialPreloadCacheTest {
         {
             Fake f=new Fake();OfficialPreloadCache<String> c=f.cache();List<String> consumed=new ArrayList<>();
             check(c.add("a","item-a"));long add=f.request,task=f.task;
-            c.event(add,task,"READY",0);check(c.peek("a")==null);
-            c.event(0,task+100,"READY",0);check(c.peek("a")==null);
-            c.event(add,task,"ADDED",0);check(c.peek("a")==null);
+            c.event(add,task,"READY",-22);check(!c.isBroken() && c.peek("a").equals("item-a"));
+            c.event(0,task+100,"READY",-22);check(!c.isBroken() && c.peek("a").equals("item-a"));
+            c.event(add,task,"ADDED",0);check(c.peek("a").equals("item-a"));
             c.event(0,task,"READY",0);check(c.peek("a").equals("item-a"));
             check(c.take("a",consumed::add));long detach=f.request;
             c.event(0,task,"READY",0);check(c.peek("a")==null);
@@ -38,7 +38,8 @@ public final class OfficialPreloadCacheTest {
         {
             Fake f=new Fake();OfficialPreloadCache<String> c=f.cache();
             c.add("a","item-a");long add=f.request,task=f.task;
-            check(!c.take("a",i->{throw new AssertionError("Unready item transferred");}));
+            c.discard("a");
+            check(!c.take("a",i->{throw new AssertionError("Removing item transferred");}));
             long remove=f.request;
             check(f.calls.equals(List.of("add:item-a","interrupt:item-a","remove:item-a")));
             c.event(0,task,"READY",0);check(c.peek("a")==null && c.size()==1);
@@ -79,6 +80,27 @@ public final class OfficialPreloadCacheTest {
             c.discardExcept(null);check(c.peek("a")==null && c.size()==1);
             c.event(f.request,at,"REMOVED",0);check(c.size()==0);
         }
-        System.out.println("6 ownership scenarios passed");
+        {
+            Fake f=new Fake();OfficialPreloadCache<String> c=f.cache();List<String> consumed=new ArrayList<>();
+            c.add("pending","item");long add=f.request,task=f.task;
+            check(c.peek("pending").equals("item"));
+            check(c.take("pending",consumed::add));long detach=f.request;
+            check(c.peek("pending")==null && consumed.isEmpty());
+            c.event(add,task,"ADDED",0);
+            c.event(0,task,"READY",0);check(consumed.isEmpty());
+            c.event(add,task,"DETACHED",0);check(consumed.isEmpty());
+            c.event(detach,task,"DETACHED",0);check(consumed.equals(List.of("item")));
+            c.event(0,task,"READY",0);c.event(detach,task,"DETACHED",0);
+            check(consumed.size()==1 && c.size()==0 && !f.calls.contains("release:item"));
+        }
+        {
+            Fake f=new Fake();OfficialPreloadCache<String> c=f.cache();List<String> consumed=new ArrayList<>();
+            c.add("pending","item");
+            check(c.take("pending",consumed::add));
+            f.timers.get(1).run();
+            check(c.isBroken() && f.failures==1 && consumed.isEmpty());
+            check(!f.calls.contains("release:item") && c.peek("pending")==null);
+        }
+        System.out.println("8 ownership scenarios passed");
     }
 }
