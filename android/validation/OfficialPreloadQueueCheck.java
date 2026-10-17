@@ -146,7 +146,7 @@ public final class OfficialPreloadQueueCheck {
                     public void failed(Exception e) {
                         throw new AssertionError(e);
                     }
-                }, (delay, action) -> {}, SystemClock::elapsedRealtime, 8);
+                }, (delay, action) -> {}, SystemClock::elapsedRealtime, 20);
         OfficialRuntime runtime = new OfficialRuntime(context(), null, null);
         field("preloads").set(runtime, cache);
         Control control = new Control();
@@ -160,54 +160,64 @@ public final class OfficialPreloadQueueCheck {
         drain.setAccessible(true);
         Method take = OfficialRuntime.class.getDeclaredMethod("takePreloadProbe", String.class);
         take.setAccessible(true);
-        String[] keys = {"a", "b", "c", "d", "e", "f", "g", "h"};
-        for (int i = 0; i < keys.length; i++) {
-            check(cache.add(keys[i], keys[i]));
-            cache.event(0, 2L * i + 1, "READY", 0);
-        }
+        String[] keys = new String[20];
+        for (int i = 0; i < keys.length; i++)
+            keys[i] = Character.toString((char) ('a' + i));
         Bundle request = new Bundle();
         request.putLong("preloadQueuedAt", SystemClock.elapsedRealtime());
+        check(OfficialRuntime.PRELOAD_PARALLELISM == 4);
+        for (int i = 0; i < 4; i++)
+            check(cache.add(keys[i], keys[i]));
         queue.put("next", request);
         drain.invoke(runtime);
-        check(control.resumes == 1 && cache.size() == 8 && queue.size() == 1
-                && calls.subList(8, calls.size()).equals(List.of("interrupt:a", "remove:a")));
+        check(cache.preparing() == 4 && queue.size() == 1 && calls.size() == 4);
+        queue.clear();
+        for (int i = 0; i < keys.length; i++) {
+            if (i >= 4)
+                check(cache.add(keys[i], keys[i]));
+            cache.event(0, 2L * i + 1, "READY", 0);
+        }
+        queue.put("next", request);
         drain.invoke(runtime);
-        check(calls.size() == 10 && queue.size() == 1);
+        check(control.resumes == 1 && cache.size() == 20 && queue.size() == 1
+                && calls.subList(20, calls.size()).equals(List.of("interrupt:a", "remove:a")));
+        drain.invoke(runtime);
+        check(calls.size() == 22 && queue.size() == 1);
         cache.event(999, 1, "REMOVED", 0);
         take.invoke(runtime, new Object[] {null});
-        check(cache.size() == 8 && queue.size() == 1 && calls.size() == 10);
+        check(cache.size() == 20 && queue.size() == 1 && calls.size() == 22);
         queue.clear();
         Bundle expired = new Bundle();
         expired.putLong("preloadQueuedAt", SystemClock.elapsedRealtime() - 30001);
         queue.put("expired", expired);
         queue.put("b", request);
         drain.invoke(runtime);
-        check(queue.isEmpty() && calls.size() == 10);
+        check(queue.isEmpty() && calls.size() == 22);
         field("player").set(runtime, new Handle());
         queue.put("next", request);
         drain.invoke(runtime);
-        check(queue.size() == 1 && control.pauses == 1 && calls.size() == 10);
+        check(queue.size() == 1 && control.pauses == 1 && calls.size() == 22);
         field("prepared").setBoolean(runtime, true);
         field("playbackBuffered").setLong(runtime, 4999);
         drain.invoke(runtime);
         check(control.resumes == 1 && queue.size() == 1);
         field("playbackBuffered").setLong(runtime, 5000);
         drain.invoke(runtime);
-        check(control.resumes == 2 && calls.size() == 10);
+        check(control.resumes == 2 && calls.size() == 22);
         field("preloadPermitUntil").setLong(runtime, 0);
         drain.invoke(runtime);
         check(control.pauses == 2 && queue.size() == 1);
         runtime.enablePreloads(false);
-        check(queue.isEmpty() && cache.size() == 8 && calls.size() == 10);
+        check(queue.isEmpty() && cache.size() == 20 && calls.size() == 22);
         Method scope = OfficialRuntime.class.getDeclaredMethod("syncPreloadScope", Bundle.class);
         scope.setAccessible(true);
         Bundle account = new Bundle();
         account.putString("preloadScope", "account-a");
         scope.invoke(runtime, account);
-        check(calls.size() == 10);
+        check(calls.size() == 22);
         account.putString("preloadScope", "account-b");
         scope.invoke(runtime, account);
-        check(removals.size() == 8 && cache.size() == 8 && queue.isEmpty());
+        check(removals.size() == 20 && cache.size() == 20 && queue.isEmpty());
         for (long[] movement : removals.values())
             cache.event(movement[0], movement[1], "REMOVED", 0);
         check(cache.size() == 0);

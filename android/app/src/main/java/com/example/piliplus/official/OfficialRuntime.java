@@ -19,6 +19,7 @@ import java.util.concurrent.*;
 /** One original player owns audio, video and timing in our dedicated process. */
 @android.annotation.TargetApi(26) // The plugin rejects Android versions below 26.
 final class OfficialRuntime {
+    static final int PRELOAD_PARALLELISM = 4;
     interface Events {
         void send(Bundle data);
     }
@@ -37,7 +38,7 @@ final class OfficialRuntime {
     private boolean mediaCacheAttempted;
     private final Map<Object, OfficialMediaCache.Lease> itemCaches = new IdentityHashMap<>();
     private final ThreadPoolExecutor preloadProbeWorker =
-            new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(2),
+            new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(PRELOAD_PARALLELISM),
                     r -> new Thread(r, "official-preload-probe"));
     private final Map<String, PreloadProbe> preloadProbes = new HashMap<>();
     private final Map<String, Bundle> pendingPreloads = new LinkedHashMap<>();
@@ -992,7 +993,7 @@ final class OfficialRuntime {
         if (preloader != null)
             throw new IOException("Preloader initialization previously failed");
         preloader = construct("com.bilibili.ijk.preload.IJKNativePreloader");
-        preloads = createPreloadCache(preloader, 8);
+        preloads = createPreloadCache(preloader, OfficialPreloadCache.MAX_ENTRIES);
         watchPreloads();
     }
     private void watchPreloads() {
@@ -1083,7 +1084,8 @@ final class OfficialRuntime {
                                         ready.preloadComplete = true;
                                     if (owner == preloader)
                                         drainPreloads();
-                                    if (com.example.piliplus.BuildConfig.DEBUG)
+                                    if (com.example.piliplus.BuildConfig.DEBUG
+                                            || android.util.Log.isLoggable("PiliPreload", android.util.Log.DEBUG))
                                         android.util.Log.d("PiliPreload",
                                                 type + " foreground="
                                                         + (owner == foregroundPreloader)
@@ -1199,9 +1201,9 @@ final class OfficialRuntime {
                 pendingPreloads.remove(key);
                 continue;
             }
-            if (preloads.preparing() + preloadProbes.size() >= 2)
+            if (preloads.preparing() + preloadProbes.size() >= PRELOAD_PARALLELISM)
                 return;
-            if (preloads.size() + preloadProbes.size() >= 8) {
+            if (preloads.size() + preloadProbes.size() >= OfficialPreloadCache.MAX_ENTRIES) {
                 preloads.makeRoom();
                 return;
             }

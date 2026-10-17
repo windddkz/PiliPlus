@@ -14,7 +14,7 @@ final class OfficialMediaCache {
     static final long ENTRY_BYTES = 21 * TRACK_BYTES + 1024 * 1024;
     static final long MIN_FREE_BYTES = 200L * 1024 * 1024;
     static final int MAX_ENTRIES = 64;
-    static final long TOTAL_BYTES = 8L * 1024 * 1024 * 1024;
+    static final long TOTAL_BYTES = 20L * 1024 * 1024 * 1024;
     static final long TTL_MILLIS = 20 * 60 * 1000L;
     private final Path root;
     private final LongSupplier now;

@@ -7,6 +7,7 @@ import java.util.function.LongSupplier;
 
 /** Worker-thread ownership of original native preload tasks, including pending removals. */
 final class OfficialPreloadCache<T> {
+    static final int MAX_ENTRIES = 20;
     interface Backend<T> {
         void add(long request, long task, T item) throws Exception;
         void detach(long request, long task, T item) throws Exception;
@@ -52,7 +53,7 @@ final class OfficialPreloadCache<T> {
     }
     OfficialPreloadCache(Backend<T> backend, Scheduler scheduler, LongSupplier now, int capacity,
             long lifetime) {
-        if (capacity < 1 || capacity > 8 || lifetime <= 0)
+        if (capacity < 1 || capacity > MAX_ENTRIES || lifetime <= 0)
             throw new IllegalArgumentException("Invalid preload capacity");
         this.backend = backend;
         this.scheduler = scheduler;

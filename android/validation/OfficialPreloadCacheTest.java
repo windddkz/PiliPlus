@@ -422,24 +422,24 @@ public final class OfficialPreloadCacheTest {
         {
             Fake f = new Fake();
             OfficialPreloadCache<String> c =
-                    new OfficialPreloadCache<>(f, f, () -> f.now, 8, 1200000);
-            for (int i = 0; i < 8; i++)
+                    new OfficialPreloadCache<>(f, f, () -> f.now, 20, 1200000);
+            for (int i = 0; i < 20; i++)
                 check(c.add("k" + i, "item" + i));
-            check(c.size() == 8 && c.preparing() == 8);
+            check(c.size() == 20 && c.preparing() == 20);
             long last = f.task;
             c.event(0, last, "READY", 0);
-            check(c.preparing() == 7 && c.ready("k7") && c.ready(last).equals("item7"));
+            check(c.preparing() == 19 && c.ready("k19") && c.ready(last).equals("item19"));
             check(!c.add("overflow", "overflow"));
-            check(f.task == last && f.calls.contains("remove:item7"));
-            check(f.calls.contains("release:overflow") && c.size() == 8);
-            check(c.ready(last) == null && !c.ready("k7"));
+            check(f.task == last && f.calls.contains("remove:item19"));
+            check(f.calls.contains("release:overflow") && c.size() == 20);
+            check(c.ready(last) == null && !c.ready("k19"));
             c.event(f.request, last, "REMOVED", 0);
-            check(c.size() == 7 && !c.isBroken());
+            check(c.size() == 19 && !c.isBroken());
         }
         {
             Fake f = new Fake();
             OfficialPreloadCache<String> c =
-                    new OfficialPreloadCache<>(f, f, () -> f.now, 8, 1200000);
+                    new OfficialPreloadCache<>(f, f, () -> f.now, 20, 1200000);
             check(c.add("a", "item"));
             long task = f.task;
             c.event(0, task, "READY", 0);
@@ -455,7 +455,7 @@ public final class OfficialPreloadCacheTest {
         {
             Fake f = new Fake();
             OfficialPreloadCache<String> c =
-                    new OfficialPreloadCache<>(f, f, () -> f.now, 8, 1200000);
+                    new OfficialPreloadCache<>(f, f, () -> f.now, 20, 1200000);
             check(c.add("a", "item"));
             long task = f.task;
             c.event(0, task, "READY", 0);

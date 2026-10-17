@@ -82,17 +82,20 @@ public final class OfficialMediaCacheCheck {
         OfficialMediaCache budget = new OfficialMediaCache(budgetRoot.toFile());
         long ladderReservation = 7L * 128 * 1024 * 1024 + 1024 * 1024;
         assert budget.acquire(key(1), 7, ladderReservation * 2 - 1) == null;
-        var a = budget.acquire(key(1), 21, Long.MAX_VALUE);
-        var b = budget.acquire(key(2), 21, Long.MAX_VALUE);
-        var c = budget.acquire(key(3), 21, Long.MAX_VALUE);
-        assert a != null && b != null && c != null;
-        assert budget.acquire(key(4), 2, Long.MAX_VALUE) == null;
-        budget.release(a, true);
-        var d = budget.acquire(key(4), 2, Long.MAX_VALUE);
-        assert d != null : "Idle entries must reserve actual bytes, not unused track quotas";
-        budget.release(b, false);
-        budget.release(c, false);
-        budget.release(d, false);
+        var leases = new java.util.ArrayList<OfficialMediaCache.Lease>();
+        for (int i = 0; i < 21; i++) {
+            var lease = budget.acquire(key(i + 1), 7, Long.MAX_VALUE);
+            assert lease != null : "20 retained ladders plus foreground must fit";
+            leases.add(lease);
+        }
+        assert budget.acquire(key(22), 21, Long.MAX_VALUE) == null;
+        budget.release(leases.remove(0), true);
+        budget.release(leases.remove(0), true);
+        var replacementBudget = budget.acquire(key(22), 21, Long.MAX_VALUE);
+        assert replacementBudget != null : "Idle entries must return unused track quotas";
+        for (var lease : leases)
+            budget.release(lease, false);
+        budget.release(replacementBudget, false);
         budget.clear();
         Files.delete(budgetRoot);
         Path priorityRoot = Files.createDirectory(base.resolve("priority"));
