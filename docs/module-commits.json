@@ -1,7 +1,7 @@
 {
   "base": "b2d6a5befb6dd292b9f7ad98794f3620f6dfb818",
   "branch": "feat/official-player-alignment",
-  "note": "Historical source snapshots reconstructed as reviewable modules; initial foundation commits are interdependent. Documentation commits follow this code manifest. Product behavior remains candidate308/311; publication helpers/tests listed separately.",
+  "note": "Historical source snapshots and subsequent feature changes grouped as reviewable modules. Foundation commits are interdependent. Current additions cover bounded preload retention, page refill and decoded-stream diagnostics; performance measurements and remaining limits are documented separately.",
   "commits": [
     {
       "commit": "5e0f7cf77f9d4a8f65c0dec667e94c609d570a0b",
@@ -1031,6 +1031,62 @@
       "source_candidate": null,
       "files": [
         "validation/buffering_recheck_test.py"
+      ]
+    },
+    {
+      "commit": "36e88f3ecb3d481be1f6716bd4614858c0ade526",
+      "title": "feat(cache): retain isolated playurl snapshots and resume positions",
+      "source_candidate": 319,
+      "files": [
+        "lib/http/play_url_prefetch.dart",
+        "lib/models/video/play/url.dart",
+        "validation/play_url_prefetch_test.dart"
+      ]
+    },
+    {
+      "commit": "83cfb301dedb890caa4c39af82a22b0380cbb63a",
+      "title": "feat(player): retain bounded official media caches across playback sessions",
+      "source_candidate": 319,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialMediaCache.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlaybackService.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPreloadCache.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/official_audio/helper/dev/piliplus/dspbridge/DspBridge.java",
+        "android/official_audio/media_cache.c",
+        "android/official_audio/media_cache.h",
+        "android/official_audio/media_cache_guards.h",
+        "android/validation/OfficialMediaCacheCheck.java",
+        "android/validation/OfficialPreloadCacheTest.java",
+        "android/validation/media_cache_test.c",
+        "scripts/prepare_official_audio.py"
+      ]
+    },
+    {
+      "commit": "7b81af1a44abebe09f5bc985e94bd7038a39f1ae",
+      "title": "feat(preload): prioritize page candidates and refill retained media on return",
+      "source_candidate": 319,
+      "files": [
+        "lib/http/preload_queue.dart",
+        "lib/http/video.dart",
+        "lib/pages/rcmd/view.dart",
+        "lib/pages/video/controller.dart",
+        "lib/pages/video/related/view.dart",
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/official_player_test.dart",
+        "validation/preload_queue_test.dart"
+      ]
+    },
+    {
+      "commit": "1bd9d07e5907ae10c9c4554190619d99ff20b97e",
+      "title": "fix(audio): report the decoded stream independently of preload lookups",
+      "source_candidate": 321,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/official_audio/graph_adapter.c",
+        "validation/dolby_loudness_test.py"
       ]
     }
   ]
