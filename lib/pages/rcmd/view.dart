@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:PiliPlus/common/skeleton/video_card_v.dart';
 import 'package:PiliPlus/common/sliver_single_child_delegate.dart';
 import 'package:PiliPlus/common/style.dart';
@@ -5,10 +7,16 @@ import 'package:PiliPlus/common/widgets/flutter/refresh_indicator.dart';
 import 'package:PiliPlus/common/widgets/loading_widget/http_error.dart';
 import 'package:PiliPlus/common/widgets/video_card/video_card_v.dart';
 import 'package:PiliPlus/http/loading_state.dart';
+import 'package:PiliPlus/http/video.dart';
+import 'package:PiliPlus/models/model_rec_video_item.dart';
+import 'package:PiliPlus/pages/home/controller.dart';
+import 'package:PiliPlus/pages/main/controller.dart';
 import 'package:PiliPlus/pages/rcmd/controller.dart';
 import 'package:PiliPlus/utils/grid.dart';
+import 'package:PiliPlus/utils/id_utils.dart';
 import 'package:PiliPlus/utils/storage_pref.dart';
 import 'package:get/get.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:material_ui/material_ui.dart';
 
 class RcmdPage extends StatefulWidget {
@@ -21,6 +29,44 @@ class RcmdPage extends StatefulWidget {
 class _RcmdPageState extends State<RcmdPage>
     with AutomaticKeepAliveClientMixin {
   final controller = Get.put(RcmdController());
+  List<dynamic>? _prefetchList;
+
+  bool get _canPrefetch {
+    if (!mounted ||
+        !VideoHttp.prefetchEnabled ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return false;
+    }
+    final main = Get.find<MainController>();
+    final home = Get.find<HomeController>();
+    return main.navigationBars[main.selectedIndex.value] == .home &&
+        !home.tabController.indexIsChanging &&
+        home.tabs[home.tabController.index] == .rcmd;
+  }
+
+  Future<void> _prefetch(List<dynamic> items) async {
+    if (!_canPrefetch) return;
+    final network = await Connectivity().checkConnectivity();
+    if (!network.contains(ConnectivityResult.wifi)) return;
+    // shortcut: First three feed entries; use visible rows when integrating media preloading.
+    var count = 0;
+    for (final item in items) {
+      if (!_canPrefetch || !identical(items, _prefetchList)) return;
+      if (item is! BaseRcmdVideoItemModel ||
+          item.goto != 'av' ||
+          item.cid == null ||
+          item.cid! <= 0 ||
+          (item.bvid == null && item.aid == null)) {
+        continue;
+      }
+      await VideoHttp.prefetchVideoUrl(
+        item.bvid ?? IdUtils.av2bv(item.aid!),
+        item.cid!,
+      );
+      if (++count == 3) return;
+    }
+  }
 
   @override
   bool get wantKeepAlive => true;
@@ -63,6 +109,13 @@ class _RcmdPageState extends State<RcmdPage>
     ColorScheme colorScheme,
     LoadingState<List<dynamic>?> loadingState,
   ) {
+    if (loadingState case Success(:final response?)
+        when !identical(response, _prefetchList)) {
+      _prefetchList = response;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_prefetch(response).catchError((Object _) {}));
+      });
+    }
     return switch (loadingState) {
       Loading() => _buildSkeleton,
       Success(:final response) =>

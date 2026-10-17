@@ -12,6 +12,9 @@ class RetryInterceptor extends Interceptor {
 
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) {
+    if (err.requestOptions.extra['playUrlPrefetch'] == true) {
+      return handler.next(err);
+    }
     if (err.requestOptions.responseType == ResponseType.stream) {
       return handler.next(err);
     }

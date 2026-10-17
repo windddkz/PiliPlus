@@ -967,7 +967,23 @@ class VideoDetailController extends GetxController
       preferCodecs = isWiFi ? Pref.preferCodecs : Pref.preferCodecsCellular;
     }
 
-    final result = await _getVideoUrl(VideoQuality.hdrVivid.code);
+    final prefetched =
+        !fromReset &&
+            (_actualVideoType ?? videoType) == VideoType.ugc &&
+            epId == null &&
+            seasonId == null &&
+            currLang.value == null
+        ? await VideoHttp.takePrefetchedVideoUrl((
+            bvid: bvid,
+            cid: cid.value,
+            tryLook: plPlayerController.tryLook,
+            voiceBalance: plPlayerController.requestLoudnessMetadata,
+          ))
+        : null;
+    if (!_isCurrentVideoUrl(request)) return;
+    final result = prefetched == null
+        ? await _getVideoUrl(VideoQuality.hdrVivid.code)
+        : Success(prefetched);
     if (!_isCurrentVideoUrl(request)) return;
 
     if (result case Success(:final response)) {

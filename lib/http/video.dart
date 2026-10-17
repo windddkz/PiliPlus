@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:PiliPlus/common/constants.dart';
 import 'package:PiliPlus/grpc/bilibili/main/community/reply/v1.pb.dart'
@@ -9,8 +10,10 @@ import 'package:PiliPlus/http/constants.dart';
 import 'package:PiliPlus/http/init.dart';
 import 'package:PiliPlus/http/loading_state.dart';
 import 'package:PiliPlus/http/login.dart';
+import 'package:PiliPlus/http/play_url_prefetch.dart';
 import 'package:PiliPlus/models/common/account_type.dart';
 import 'package:PiliPlus/models/common/video/video_type.dart';
+import 'package:PiliPlus/models/common/video/video_quality.dart';
 import 'package:PiliPlus/models/home/rcmd/result.dart';
 import 'package:PiliPlus/models/model_hot_video_item.dart';
 import 'package:PiliPlus/models/model_rec_video_item.dart';
@@ -29,6 +32,7 @@ import 'package:PiliPlus/models_new/video/video_play_info/data.dart';
 import 'package:PiliPlus/models_new/video/video_relation/data.dart';
 import 'package:PiliPlus/models_new/video/video_shot/data.dart';
 import 'package:PiliPlus/utils/accounts.dart';
+import 'package:PiliPlus/utils/accounts/account.dart';
 import 'package:PiliPlus/utils/app_sign.dart';
 import 'package:PiliPlus/utils/extension/string_ext.dart';
 import 'package:PiliPlus/utils/global_data.dart';
@@ -41,11 +45,63 @@ import 'package:PiliPlus/utils/subtitle_utils.dart';
 import 'package:PiliPlus/utils/utils.dart';
 import 'package:PiliPlus/utils/wbi_sign.dart';
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/foundation.dart' show compute, debugPrint, kDebugMode;
 import 'package:protobuf/protobuf.dart';
 
 /// view层根据 status 判断渲染逻辑
 abstract final class VideoHttp {
+  static final _prefetch = PlayUrlPrefetch();
+
+  static bool get prefetchEnabled =>
+      Platform.isAndroid && Pref.officialAudioBackend && Pref.preInitPlayer;
+
+  static Future<void> prefetchVideoUrl(String bvid, int cid) async {
+    if (!prefetchEnabled) return;
+    final account = Accounts.video;
+    final key = (
+      bvid: bvid,
+      cid: cid,
+      tryLook: !account.isLogin && Pref.p1080,
+      voiceBalance:
+          Pref.audioNormalization != '0' ||
+          const {'normal', 'high_dynamic'}.contains(Pref.officialLoudnessMode),
+    );
+    await _prefetch.preload(account, key, () async {
+      final cancel = CancelToken();
+      try {
+        return await videoUrl(
+          bvid: bvid,
+          cid: cid,
+          qn: VideoQuality.hdrVivid.code,
+          tryLook: key.tryLook,
+          voiceBalance: key.voiceBalance,
+          videoType: .ugc,
+          prefetchAccount: account,
+          cancelToken: cancel,
+        ).timeout(
+          const Duration(seconds: 2),
+          onTimeout: () {
+            cancel.cancel('prefetch expired');
+            return const Error('prefetch expired');
+          },
+        );
+      } finally {
+        cancel.cancel('prefetch finished');
+      }
+    });
+  }
+
+  static Future<PlayUrlModel?> takePrefetchedVideoUrl(PlayUrlKey key) async {
+    if (!prefetchEnabled) return null;
+    final account = Accounts.video;
+    final response = await _prefetch.take(account, key);
+    if (!identical(account, Accounts.video) || !prefetchEnabled) return null;
+    if (response != null && kDebugMode) {
+      debugPrint('PlayUrlPrefetch: consumed response');
+    }
+    return response;
+  }
+
   static RegExp zoneRegExp = RegExp(Pref.banWordForZone, caseSensitive: false);
   static bool enableFilter = zoneRegExp.pattern.isNotEmpty;
 
@@ -224,6 +280,8 @@ abstract final class VideoHttp {
     required VideoType videoType,
     String? language,
     bool voiceBalance = false,
+    Account? prefetchAccount,
+    CancelToken? cancelToken,
   }) async {
     final dmImgStr = Utils.base64EncodeRandomString(16, 64);
     final dmCoverImgStr = Utils.base64EncodeRandomString(32, 128);
@@ -252,7 +310,19 @@ abstract final class VideoHttp {
     });
 
     try {
-      final res = await Request().get(videoType.api, queryParameters: params);
+      final res = await Request().get(
+        videoType.api,
+        queryParameters: params,
+        cancelToken: cancelToken,
+        options: prefetchAccount == null
+            ? null
+            : Options(
+                extra: {
+                  'account': prefetchAccount,
+                  'playUrlPrefetch': true,
+                },
+              ),
+      );
 
       if (res.data['code'] == 0) {
         late PlayUrlModel data;
@@ -285,6 +355,8 @@ abstract final class VideoHttp {
           videoType: .pgc,
           language: language,
           voiceBalance: voiceBalance,
+          prefetchAccount: prefetchAccount,
+          cancelToken: cancelToken,
         );
       }
       return Error(_parseVideoErr(res.data['code'], res.data['message']));
