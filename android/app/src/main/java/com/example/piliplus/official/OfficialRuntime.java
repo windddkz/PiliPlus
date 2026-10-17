@@ -296,10 +296,10 @@ final class OfficialRuntime {
             if(audio!=null&&!audio.isEmpty()) {
                 if(source.startsWith("/")!=audio.startsWith("/"))throw new IllegalArgumentException("Mixed local/network DASH");
                 stage("video_probe");
-                DashSource video=DashSource.probe(source,userAgent,referer);
+                DashSource video=DashSource.probe(source,sourceTrack==null?Collections.emptyList():sourceTrack.backups,userAgent,referer);
                 directHdr=video.hdr && Build.VERSION.SDK_INT>=33 && outputParent!=null;
                 stage("audio_probe");
-                DashSource sound=DashSource.probe(audio,userAgent,referer);
+                DashSource sound=DashSource.probe(audio,audioTrack==null?Collections.emptyList():audioTrack.backups,userAgent,referer);
                 if(!Arrays.asList("H264","HEVC","AV1").contains(video.codec)||!Arrays.asList("AAC","FLAC","AC3","EAC3").contains(sound.codec))throw new IllegalArgumentException("DASH track types do not match");
                 Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField(source.startsWith("/")?"OFFLINE":"VOD").get(null);
                 // Local or manually supplied tracks retain opaque adapter IDs when metadata is unavailable.
@@ -353,7 +353,7 @@ final class OfficialRuntime {
     }
     private Object dashStream(DashSource source,int mediaType,int qn,OfficialStream track) throws Exception {
         Object codec=cls("com.bilibili.ijk.media.CodecID").getField(source.codec).get(null);
-        return construct("com.bilibili.ijk.media.IJKDashStream",mediaType,(Integer)invoke(codec,"getId"),qn,track==null?0:track.bandwidth,source.url,track==null?Collections.emptyList():track.backups);
+        return construct("com.bilibili.ijk.media.IJKDashStream",mediaType,(Integer)invoke(codec,"getId"),qn,track==null?0:track.bandwidth,source.url,track==null?Collections.emptyList():track.alternativesFor(source.url));
     }
     private void applyRoute() throws Exception {
         if(route.endpoint()!=appliedEndpoint&&prepared) {

@@ -14,6 +14,8 @@ public final class OfficialStreamCheck {
         OfficialStream track=new OfficialStream(URL,URL,126L,8000000L,input);
         input.clear();assert track.id==126 && track.bandwidth==8000000;
         assert track.backups.equals(Collections.singletonList(backup));
+        assert track.alternativesFor(URL).equals(Collections.singletonList(backup));
+        assert track.alternativesFor(backup).equals(Collections.singletonList(URL));
         assert new OfficialStream(URL,URL,30251,0,Collections.emptyList()).bandwidth==0;
         rejects(backup,126,8000000,Collections.emptyList());
         rejects(URL,0,0,Collections.emptyList());

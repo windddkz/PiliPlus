@@ -12,6 +12,12 @@ final class FragmentIndex {
     }
     static String inspect(byte[] prefix, long fileSize) { return inspectInfo(prefix, fileSize).codec; }
     static Info inspectInfo(byte[] prefix, long fileSize) {
+        Info info=inspectAvailable(prefix,fileSize);
+        if(info==null)throw new IllegalArgumentException("No verified fragment index within probe limit");
+        return info;
+    }
+    // Null means more prefix bytes are needed; malformed complete boxes still throw.
+    static Info inspectAvailable(byte[] prefix, long fileSize) {
         Info info = new Info();
         if (prefix.length > fileSize || fileSize <= 0) throw new IllegalArgumentException("Invalid file size");
         ByteBuffer b = ByteBuffer.wrap(prefix).order(ByteOrder.BIG_ENDIAN);
@@ -49,7 +55,7 @@ final class FragmentIndex {
             }
             at = end;
         }
-        throw new IllegalArgumentException("No verified fragment index within probe limit");
+        return null;
     }
 
     private static String type(byte[] bytes, int at) { return new String(bytes, at, 4, StandardCharsets.US_ASCII); }

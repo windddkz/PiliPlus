@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application>
+    <application android:networkSecurityConfig="@xml/official_probe_network">
         <activity android:name=".official.OfficialPluginTestActivity"
             android:exported="true" android:label="Official bridge callback test" />
         <activity android:name=".official.OfficialPlaybackTestActivity"

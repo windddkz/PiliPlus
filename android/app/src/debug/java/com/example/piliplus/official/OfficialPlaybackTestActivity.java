@@ -182,6 +182,17 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
             source.putString("source", asset((sample.equals("sync-fragmented") || sample.equals("sync-loudness")) ? "fragmented-dash-video.mp4" : sample));
             if (sample.equals("sync-fragmented")) source.putString("audio", asset("fragmented-dash-audio.m4a"));
             if (sample.equals("sync-loudness")) source.putString("audio", asset("loudness-fragmented-audio.m4a"));
+            if(getIntent().getBooleanExtra("probeFallback",false)) {
+                if(!sample.equals("sync-fragmented"))throw new IllegalArgumentException("Network probe requires owned fragmented fixtures");
+                for(String kind:new String[]{"video","audio"}) {
+                    String primary="http://127.0.0.1:17676/missing-"+kind;
+                    String backup="http://127.0.0.1:17676/"+kind;
+                    source.putString(kind.equals("video")?"source":"audio",primary);
+                    Bundle track=new Bundle();track.putString("source",primary);track.putInt("id",kind.equals("video")?80:30280);
+                    track.putInt("bandwidth",0);track.putStringArrayList("backups",new ArrayList<>(Collections.singletonList(backup)));
+                    source.putBundle(kind.equals("video")?"sourceTrack":"audioTrack",track);
+                }
+            }
             source.putInt("endpoint", getIntent().getIntExtra("endpoint", 0));
             source.putFloat("speed", getIntent().getFloatExtra("speed", 1)); source.putFloat("volume", 1); source.putInt("virtualizer", getIntent().getIntExtra("virtualizer", 1));
             String mode = getIntent().getStringExtra("loudnessMode");

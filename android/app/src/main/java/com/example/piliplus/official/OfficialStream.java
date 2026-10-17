@@ -32,6 +32,12 @@ final class OfficialStream {
         return (int)n;
     }
 
+    List<String> alternativesFor(String selected) {
+        LinkedHashSet<String> urls=new LinkedHashSet<>(backups);
+        urls.add(source);urls.remove(selected);
+        return new ArrayList<>(urls);
+    }
+
     private static void validateUrl(String value) {
         if(value.length()>16384)throw new IllegalArgumentException("Stream URL too long");
         URI uri=URI.create(value);
