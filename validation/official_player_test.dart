@@ -78,6 +78,46 @@ void main() {
     audioOnly: false,
   );
 
+  test('live source carries its mode, rejects seek, and VOD clears live state', () async {
+    final p = await create();
+    try {
+      final ready = p.openSource(
+        NetworkSource(videoSource: 'https://example.invalid/live.flv?test=1', audioSource: null),
+        userAgent: 'test', referer: '', audioOnly: false, isLive: true,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.last.arguments['isLive'], true);
+      await emit({'event': 'prepared'});
+      await ready;
+      await expectLater(p.seek(const Duration(seconds: 3)), throwsStateError);
+      expect(calls.where((c) => c.method == 'seek'), isEmpty);
+      final vod = open(p);
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.last.arguments['isLive'], false);
+      await emit({'event': 'prepared', 'load': 2});
+      await vod;
+      final seeking = p.seek(const Duration(seconds: 3));
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.last.method, 'seek');
+      await emit({'event': 'seek_complete', 'load': 2, 'position': 3000, 'target': 3000, 'duration': 10000, 'accurate': true, 'timedOut': false});
+      await seeking;
+    } finally { await p.dispose(); }
+  });
+
+  test('live rejects split sources and initial seek before sending native open', () async {
+    final p = await create();
+    try {
+      for (final split in [false, true]) {
+        await expectLater(p.openSource(
+          NetworkSource(videoSource: 'https://example.invalid/live', audioSource: split ? 'https://example.invalid/audio' : null),
+          userAgent: 'test', referer: '', audioOnly: false, isLive: true,
+          position: split ? null : const Duration(seconds: 3),
+        ), throwsArgumentError);
+      }
+      expect(calls.where((c) => c.method == 'open'), isEmpty);
+    } finally { await p.dispose(); }
+  });
+
   Future<void> failProbe({
     String detail = 'open_video_probe_IOException',
     bool always = false,

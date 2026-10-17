@@ -976,10 +976,7 @@ class PlPlayerController
     if (_playerCount == 0) {
       throw StateError('Player closed before initialization');
     }
-    if (Platform.isAndroid &&
-        Pref.officialAudioBackend &&
-        !_forceMpv &&
-        !isLive) {
+    if (Platform.isAndroid && Pref.officialAudioBackend && !_forceMpv) {
       if (enableAudioNormalization ||
           superResolutionType.value != SuperResolutionType.disable ||
           Pref.playerVolume > 100) {
@@ -1097,6 +1094,7 @@ class PlPlayerController
           dataSource,
           position: seekTo,
           audioOnly: onlyPlayAudio.value,
+          isLive: isLive,
           flipX: flipX.value,
           flipY: flipY.value,
           loudnessMode: Pref.officialLoudnessMode,
@@ -1196,7 +1194,11 @@ class PlPlayerController
     if (_playerCount == 0) throw StateError('Player closed during fallback');
     _videoPlayerController = null;
     _videoController = null;
-    await _createVideoController(dataSource, position, _sourceVolume);
+    await _createVideoController(
+      dataSource,
+      isLive ? null : position,
+      _sourceVolume,
+    );
     final next = _videoPlayerController!;
     await next.setRate(speed);
     await next.setVolume(volume);

@@ -256,9 +256,15 @@ class _LiveRoomPageState extends State<LiveRoomPage>
     Widget player = Obx(
       key: playerKey,
       () {
-        if (_liveRoomController.isLoaded.value && plPlayerController.isLive) {
+        final hasOutput = plPlayerController.hasVideoOutput;
+        final mountOfficial = plPlayerController.needsOfficialVideoSurface;
+        // The official player needs its Surface before preparation can finish.
+        if ((_liveRoomController.isLoaded.value || mountOfficial) &&
+            hasOutput &&
+            plPlayerController.isLive) {
           final roomInfoH5 = _liveRoomController.roomInfoH5.value;
           return PLVideoPlayer(
+            key: ValueKey(plPlayerController.backendRevision.value),
             maxWidth: width,
             maxHeight: height,
             fill: fill,

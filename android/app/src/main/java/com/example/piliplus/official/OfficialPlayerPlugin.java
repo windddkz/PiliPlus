@@ -196,6 +196,7 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                 if(closing || waitingOpen!=null){result.error("open_pending","Another video open is pending",null);return;}
                 if(BuildConfig.DEBUG)data.putBoolean("videoTrace",Boolean.TRUE.equals(call.argument("videoTrace")));
                 data.putBoolean("audioOnly", Boolean.TRUE.equals(call.argument("audioOnly")));
+                data.putBoolean("isLive", Boolean.TRUE.equals(call.argument("isLive")));
                 data.putBoolean("flipX", Boolean.TRUE.equals(call.argument("flipX")));
                 data.putBoolean("flipY", Boolean.TRUE.equals(call.argument("flipY")));
                 putSources(call,data);

@@ -134,6 +134,8 @@ class LiveRoomController extends GetxController {
   late final int mid;
 
   String? videoUrl;
+  NetworkSource? _liveSource;
+  int _liveUrlRequest = 0;
   bool? isPlaying;
   late bool isFullScreen = false;
 
@@ -221,7 +223,7 @@ class LiveRoomController extends GetxController {
       return null;
     }
     return plPlayerController.setDataSource(
-      NetworkSource(videoSource: videoUrl!, audioSource: null),
+      _liveSource ?? NetworkSource(videoSource: videoUrl!, audioSource: null),
       isLive: true,
       autoplay: autoplay,
       isVertical: isPortrait.value,
@@ -230,14 +232,23 @@ class LiveRoomController extends GetxController {
   }
 
   Future<void> queryLiveUrl({bool autoFullScreenFlag = false}) async {
-    currentQn ??= await ConnectivityUtils.isWiFi
-        ? Pref.liveQuality
-        : Pref.liveQualityCellular;
+    final request = ++_liveUrlRequest;
+    final requestedRoom = roomId;
+    bool current() =>
+        !isClosed && request == _liveUrlRequest && roomId == requestedRoom;
+    final quality =
+        currentQn ??
+        (await ConnectivityUtils.isWiFi
+            ? Pref.liveQuality
+            : Pref.liveQualityCellular);
+    if (!current()) return;
+    currentQn = quality;
     final res = await LiveHttp.liveRoomInfo(
       roomId: roomId,
       qn: currentQn,
       onlyAudio: plPlayerController.onlyPlayAudio.value,
     );
+    if (!current()) return;
     if (res case Success(:final response)) {
       if (response.liveStatus != 1) {
         _showDialog('当前直播间未开播');
@@ -257,16 +268,18 @@ class LiveRoomController extends GetxController {
       isPortrait.value = response.isPortrait ?? false;
       stream = playurl.stream;
       _initStreamIndex();
+      final initializing = initLiveUrl(
+        streamIndex: streamIndex,
+        formatIndex: formatIndex,
+        codecIndex: codecIndex,
+        liveUrlIndex: liveUrlIndex,
+      );
+      final selection = _liveUrlRequest;
       await Future.wait([
-        ?initLiveUrl(
-          streamIndex: streamIndex,
-          formatIndex: formatIndex,
-          codecIndex: codecIndex,
-          liveUrlIndex: liveUrlIndex,
-        ),
+        ?initializing,
         if (!isLoaded.value && Accounts.heartbeat.isLogin) _fetchBlockRules(),
       ]);
-      isLoaded.value = true;
+      if (!isClosed && selection == _liveUrlRequest) isLoaded.value = true;
     } else {
       _showDialog(res.toString());
     }
@@ -311,17 +324,15 @@ class LiveRoomController extends GetxController {
     int codecIndex = 0,
     int liveUrlIndex = 0,
   }) {
+    final request = ++_liveUrlRequest;
     this.streamIndex = streamIndex;
     this.formatIndex = formatIndex;
     this.codecIndex = codecIndex;
     this.liveUrlIndex = liveUrlIndex;
 
-    final CodecItem item = stream
-        .getOrFirst(streamIndex)
-        .format
-        .getOrFirst(formatIndex)
-        .codec
-        .getOrFirst(codecIndex);
+    final selectedStream = stream.getOrFirst(streamIndex);
+    final selectedFormat = selectedStream.format.getOrFirst(formatIndex);
+    final CodecItem item = selectedFormat.codec.getOrFirst(codecIndex);
     // 以服务端返回的码率为准
     currentQn = item.currentQn;
     acceptQnList = item.acceptQn.map((e) {
@@ -333,7 +344,81 @@ class LiveRoomController extends GetxController {
     currentQnDesc.value =
         LiveQuality.fromCode(currentQn)?.desc ?? currentQn.toString();
     videoUrl = VideoUtils.getLiveCdnUrl(item, index: liveUrlIndex);
-    return playerInit()?.whenComplete(_startSizeSub);
+    _liveSource = _networkSource(
+      item,
+      selectedStream.protocolName,
+      selectedFormat.formatName,
+      roomId,
+      request,
+    );
+    return playerInit()?.whenComplete(() {
+      if (!isClosed && request == _liveUrlRequest) _startSizeSub();
+    });
+  }
+
+  NetworkSource _networkSource(
+    CodecItem item,
+    String? protocol,
+    String? format,
+    int room,
+    int request,
+  ) {
+    final url = VideoUtils.getLiveCdnUrl(item, index: liveUrlIndex);
+    return NetworkSource(
+      videoSource: url,
+      audioSource: null,
+      videoTrack: DashTrack(
+        source: url,
+        id: item.currentQn,
+        bandwidth: null,
+        urls: item.urlInfo.map((info) => info.host + item.baseUrl + info.extra),
+      ),
+      refresh: (source) async {
+        final player = plPlayerController.videoPlayerController;
+        bool current() =>
+            !isClosed &&
+            roomId == room &&
+            request == _liveUrlRequest &&
+            identical(_liveSource, source) &&
+            identical(plPlayerController.dataSource, source) &&
+            identical(plPlayerController.videoPlayerController, player);
+        if (!current()) return null;
+        final result = await LiveHttp.liveRoomInfo(
+          roomId: room,
+          qn: item.currentQn,
+          onlyAudio: plPlayerController.onlyPlayAudio.value,
+        );
+        if (!current()) return null;
+        if (result case Success(:final response)) {
+          if (response.liveStatus != 1 ||
+              (response.roomId != null && response.roomId != room)) {
+            return null;
+          }
+          final updated = matchLiveCodec(
+            response.playurlInfo?.playurl?.stream ?? const [],
+            protocol: protocol,
+            format: format,
+            codec: item.codecName,
+            quality: item.currentQn,
+          );
+          if (updated == null || updated.urlInfo.isEmpty) return null;
+          return _networkSource(updated, protocol, format, room, request);
+        }
+        return null;
+      },
+      onRefreshed: (previous, next) {
+        if (isClosed ||
+            roomId != room ||
+            request != _liveUrlRequest ||
+            !identical(_liveSource, previous) ||
+            !identical(plPlayerController.dataSource, previous)) {
+          return;
+        }
+        _liveSource = next;
+        videoUrl = next.videoSource;
+        plPlayerController.dataSource = next;
+      },
+    );
   }
 
   Future<void> queryLiveInfoH5() async {

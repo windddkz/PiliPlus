@@ -27,6 +27,7 @@ class OfficialPlayer extends PlatformPlayer {
   int session = 0;
   int _load = 0;
   NetworkSource? _networkSource;
+  bool _isLive = false;
   bool _audioOnly = false;
   int? _refreshRequest;
   int _lastRefreshRequest = 0;
@@ -188,6 +189,7 @@ class OfficialPlayer extends PlatformPlayer {
     required String userAgent,
     required String referer,
     required bool audioOnly,
+    bool isLive = false,
     bool flipX = false,
     bool flipY = false,
     String loudnessMode = 'off',
@@ -200,7 +202,16 @@ class OfficialPlayer extends PlatformPlayer {
     if (_preparing != null) {
       throw StateError('An official source is already preparing');
     }
+    if (isLive &&
+        (source is! NetworkSource ||
+            source.audioSource != null ||
+            (position != null && position != Duration.zero))) {
+      throw ArgumentError(
+        'Live playback requires one network source without seeking',
+      );
+    }
     var load = ++_load;
+    _isLive = isLive;
     final original = source;
     _networkSource = source is NetworkSource ? source : null;
     _audioOnly = audioOnly;
@@ -239,6 +250,7 @@ class OfficialPlayer extends PlatformPlayer {
           await _send('open', {
             'load': load,
             'audioOnly': audioOnly,
+            'isLive': isLive,
             'flipX': flipX,
             'flipY': flipY,
             ..._sourceArguments(source, audioOnly),
@@ -531,6 +543,7 @@ class OfficialPlayer extends PlatformPlayer {
   Future<void> playOrPause() => state.playing ? pause() : play();
   @override
   Future<void> seek(Duration duration) {
+    if (_isLive) return Future.error(StateError('Live playback cannot seek'));
     final load = _load;
     final result = _seekTail.then((_) => _seek(duration, load));
     // The native callback has no request ID, so allow only one outstanding seek.

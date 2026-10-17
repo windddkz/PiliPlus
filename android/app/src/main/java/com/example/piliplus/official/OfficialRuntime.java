@@ -271,6 +271,8 @@ final class OfficialRuntime {
         String userAgent=request.getString("userAgent","PiliPlus"),referer=request.getString("referer","https://www.bilibili.com/");
         for(String header:new String[]{userAgent,referer})if(header.length()>4096||header.contains("\r")||header.contains("\n"))throw new IllegalArgumentException("Invalid source header");
         float rate=request.getFloat("speed",1),gain=request.getFloat("volume",1);long position=request.getLong("position",0);
+        boolean isLive=request.getBoolean("isLive",false);
+        if(isLive&&(source.startsWith("/")||audio!=null||position!=0))throw new IllegalArgumentException("Live source cannot be split or seeked");
         int endpoint=request.getInt("endpoint",0),virtualizer=request.getInt("virtualizer",1);
         if(!Float.isFinite(rate)||rate<.25f||rate>4||!Float.isFinite(gain)||gain<0||gain>1||position<0||endpoint<0||endpoint>2||virtualizer<0||virtualizer>1)
             throw new IllegalArgumentException("Invalid playback controls");
@@ -315,8 +317,8 @@ final class OfficialRuntime {
                 int videoId=sourceTrack==null?80:sourceTrack.id,audioId=audioTrack==null?30280:audioTrack.id;
                 asset=construct("com.bilibili.ijk.media.MediaAsset$Dash",audioId,videoId,Collections.singletonList(dashStream(video,0,videoId,sourceTrack)),Collections.singletonList(dashStream(sound,1,audioId,audioTrack)),scheme,options,null);
             } else {
-                // The original adapter enables HTTP recovery hooks only for VOD assets.
-                Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField(sourceTrack!=null&&!source.startsWith("/")?"VOD":"NORMAL").get(null);
+                // VOD and LIVE enable their respective original HTTP recovery hooks.
+                Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField(isLive?"LIVE":sourceTrack!=null&&!source.startsWith("/")?"VOD":"NORMAL").get(null);
                 asset=construct("com.bilibili.ijk.media.MediaAsset$Normal",source,sourceTrack==null?Collections.emptyList():sourceTrack.backups,scheme,options,null);
             }
             if(!audioOnly&&surface!=null&&!directHdr) {
@@ -401,9 +403,15 @@ final class OfficialRuntime {
                     resourceUpdates.decrementAndGet();
                     for(String key:new String[]{"source","audio"})openRequest.putString(key,next.getString(key));
                     for(String key:new String[]{"sourceTrack","audioTrack"})openRequest.putBundle(key,next.getBundle(key));
+                    if(original.getBoolean("isLive",false)) {
+                        // A restarted live encoder may reset PTS; old queues then repeatedly starve video.
+                        Bundle reopen=new Bundle(openRequest);reopen.putLong("position",0);
+                        reopen.putBoolean("play",wantedPlaying);reopen.putFloat("speed",speed);reopen.putFloat("volume",volume);
+                        open(reopen,outputSurface);
+                    }
                     Bundle event=new Bundle();event.putString("event","resource_updated");event.putLong("requestId",next.getLong("requestId"));emit(event);
                 }));
-                return replacement;
+                return original.getBoolean("isLive",false)?null:replacement;
             } catch(Exception error) {
                 worker.post(()->run(token,()->{
                     // Returning null alone tells the original DASH director to retry the old URLs.
@@ -417,9 +425,15 @@ final class OfficialRuntime {
         OfficialStream source=streamInfo(next.getBundle("sourceTrack"),next.getString("source"));
         OfficialStream before=streamInfo(original.getBundle("sourceTrack"),original.getString("source"));
         if(source==null || before==null || source.id!=before.id)throw new IOException("Refresh changed source track");
+        Object scheme=invoke(old,"getScheme"),options=invoke(old,"getOption");
+        if(original.getBoolean("isLive",false)) {
+            if(!old.getClass().getName().endsWith("$Normal") || !"LIVE".equals(scheme.toString()) || next.getString("audio")!=null)
+                throw new IOException("Refresh changed live source kind");
+            // Continuous FLV/HLS has no finite MP4 index to probe before reconnecting.
+            return construct("com.bilibili.ijk.media.MediaAsset$Normal",source.source,source.backups,scheme,options,null);
+        }
         String ua=original.getString("userAgent","PiliPlus"),referer=original.getString("referer","https://www.bilibili.com/");
         DashSource video=DashSource.probe(source.source,source.backups,ua,referer);
-        Object scheme=invoke(old,"getScheme"),options=invoke(old,"getOption");
         if(old.getClass().getName().endsWith("$Dash")) {
             OfficialStream audio=streamInfo(next.getBundle("audioTrack"),next.getString("audio"));
             OfficialStream prior=streamInfo(original.getBundle("audioTrack"),original.getString("audio"));
@@ -441,7 +455,7 @@ final class OfficialRuntime {
     }
     private void applyRoute() throws Exception {
         if(route.endpoint()!=appliedEndpoint&&prepared) {
-            Bundle next=new Bundle(openRequest);next.putLong("position",(Long)invoke(player,"getCurrentPosition"));
+            Bundle next=new Bundle(openRequest);next.putLong("position",next.getBoolean("isLive",false)?0:(Long)invoke(player,"getCurrentPosition"));
             next.putBoolean("play",wantedPlaying);next.putFloat("speed",speed);next.putFloat("volume",volume);
             Surface current=outputSurface;
             Bundle event=new Bundle();event.putString("event","buffering");event.putBoolean("buffering",true);emit(event);
@@ -511,6 +525,7 @@ final class OfficialRuntime {
     void play(boolean value) throws Exception {wantedPlaying=value;if(prepared)invoke(player,value?"start":"pause");}
     void seek(long position) throws Exception {
         if(!prepared||position<0)throw new IllegalStateException("Seek requires prepared player and valid position");
+        if(openRequest.getBoolean("isLive",false))throw new IllegalStateException("Live playback cannot seek");
         invoke(player,"seekTo",true,position,5000L);
     }
     void speed(float value) throws Exception {

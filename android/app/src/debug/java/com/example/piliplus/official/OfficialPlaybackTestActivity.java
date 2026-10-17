@@ -34,6 +34,7 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
     }
     private TextView label;
     private long session = 1;
+    private long startedSession;
     private int request, rounds, count;
     private boolean bound, opened, destroyed, resumeAfterSeek;
     private String sample;
@@ -50,7 +51,7 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
         if (!BuildConfig.OFFICIAL_AUDIO) { finish(); return; }
         sample = getIntent().getStringExtra("sample");
         if (sample == null) sample = "stereo-48000-16.flac";
-        if (!Arrays.asList("stereo-44100-16.flac", "stereo-96000-24.flac", "surround-soft.flac", "stereo-48000-16.flac", "dash-muxed.mp4", "frame-id.mp4", "sync-fragmented", "surround-soft.eac3", "surround-quiet.eac3", "loudness-stereo.m4a", "sync-loudness", "he-aac-v2-48000.m4a", "he-aac-v2-44100.m4a", "he-aac-v2-48000-implicit.aac").contains(sample))
+        if (!Arrays.asList("live.flv", "live.m3u8", "stereo-44100-16.flac", "stereo-96000-24.flac", "surround-soft.flac", "stereo-48000-16.flac", "dash-muxed.mp4", "frame-id.mp4", "sync-fragmented", "surround-soft.eac3", "surround-quiet.eac3", "loudness-stereo.m4a", "sync-loudness", "he-aac-v2-48000.m4a", "he-aac-v2-44100.m4a", "he-aac-v2-48000-implicit.aac").contains(sample))
             throw new IllegalArgumentException("Owned fixtures only");
         rounds = getIntent().getBooleanExtra("cycles", false) ? 5 : 0;
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -97,7 +98,7 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
             try (FileWriter file = new FileWriter(new File(getFilesDir(), "official-integration-events.jsonl"), true)) {
                 file.write(row + "\n");
             }
-            label.setText(event + " / session " + session);
+            label.setText("开发测试素材 " + sample + " / " + event + " / session " + session);
         } catch (Exception error) { throw new IllegalStateException(error); }
     }
     private void send(String op, Bundle data, Runnable reply) {
@@ -122,6 +123,20 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
     }
     private void acceptEvent(Bundle data) {
         String event=data.getString("event","unknown");record(event,data);
+        if(event.equals("resource_refresh") && (sample.equals("live.flv")||sample.equals("live.m3u8"))) {
+            String mode=getIntent().getStringExtra("liveRefresh");
+            if(mode!=null && !mode.equals("wait")) {
+                Bundle reply=new Bundle();reply.putLong("load",data.getLong("load"));reply.putLong("requestId",data.getLong("requestId"));
+                reply.putBoolean("available",true);
+                String url="http://127.0.0.1:17676/fresh-"+sample+"?owned=1";
+                reply.putString("source",url);Bundle track=new Bundle();track.putString("source",url);
+                track.putInt("id",mode.equals("mismatch")?81:80);track.putInt("bandwidth",0);track.putStringArrayList("backups",new ArrayList<>());
+                reply.putBundle("sourceTrack",track);
+                Runnable update=()->send("resourceUpdate",reply,()->record("live_refresh_sent",null));
+                if(getIntent().getBooleanExtra("pauseOnLiveRefresh",false))send("pause",new Bundle(),update);
+                else update.run();
+            }
+        }
         if(event.equals("resource_refresh") && getIntent().getBooleanExtra("probeFallback",false)) {
             String refresh=getIntent().getStringExtra("resourceRefresh");
             if(!"wait".equals(refresh)) {
@@ -143,7 +158,8 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
             if(data.getBoolean("timedOut")){record("failure_seek_timeout",data);return;}
             send("play",new Bundle(),()->record("resumed",null));
         }
-        if(event.equals("prepared")){
+        if(event.equals("prepared") && startedSession!=session){
+            startedSession=session;
             send("play",new Bundle(),null);if(rounds>0)cycle();
             if(bridge==null && getIntent().getBooleanExtra("repeatSurfaceAfterStart",false)){
                 long token=session;
@@ -190,11 +206,17 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
         try {
             Bundle source = new Bundle();
             source.putLong("position", getIntent().getLongExtra("position", 0));
-            source.putBoolean("audioOnly", !sample.endsWith(".mp4") && !sample.startsWith("sync-"));
+            boolean liveProbe=sample.equals("live.flv")||sample.equals("live.m3u8");
+            source.putBoolean("audioOnly", !liveProbe && !sample.endsWith(".mp4") && !sample.startsWith("sync-"));
+            source.putBoolean("isLive",liveProbe);
             source.putBoolean("clockDiagnostics", getIntent().getBooleanExtra("clockDiagnostics", false));
             source.putBoolean("startupPrefill", getIntent().getBooleanExtra("startupPrefill", false));
             source.putBoolean("videoTrace",getIntent().getBooleanExtra("videoTrace",false));
-            source.putString("source", asset((sample.equals("sync-fragmented") || sample.equals("sync-loudness")) ? "fragmented-dash-video.mp4" : sample));
+            source.putString("source", liveProbe ? "http://127.0.0.1:17676/"+sample+"?owned=1" : asset((sample.equals("sync-fragmented") || sample.equals("sync-loudness")) ? "fragmented-dash-video.mp4" : sample));
+            if(liveProbe) {
+                Bundle track=new Bundle();track.putString("source",source.getString("source"));track.putInt("id",80);
+                track.putInt("bandwidth",0);track.putStringArrayList("backups",new ArrayList<>());source.putBundle("sourceTrack",track);
+            }
             if (sample.equals("sync-fragmented")) source.putString("audio", asset("fragmented-dash-audio.m4a"));
             if (sample.equals("sync-loudness")) source.putString("audio", asset("loudness-fragmented-audio.m4a"));
             if(getIntent().getBooleanExtra("probeFallback",false)) {
