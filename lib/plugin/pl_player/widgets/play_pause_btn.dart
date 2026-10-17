@@ -20,7 +20,7 @@ class PlayOrPauseButtonState extends State<PlayOrPauseButton>
     with SingleTickerProviderStateMixin {
   late final AnimationController controller;
   late final StreamSubscription<bool> subscription;
-  late Player player;
+  late PlatformPlayer player;
 
   @override
   void initState() {

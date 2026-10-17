@@ -36,6 +36,8 @@ import 'package:PiliPlus/pages/video/post_panel/popup_menu_text.dart';
 import 'package:PiliPlus/pages/video/post_panel/view.dart';
 import 'package:PiliPlus/pages/video/widgets/header_control.dart';
 import 'package:PiliPlus/plugin/pl_player/controller.dart';
+import 'package:PiliPlus/plugin/pl_player/official_player.dart';
+import 'package:PiliPlus/plugin/pl_player/widgets/official_video.dart';
 import 'package:PiliPlus/plugin/pl_player/models/bottom_control_type.dart';
 import 'package:PiliPlus/plugin/pl_player/models/data_status.dart';
 import 'package:PiliPlus/plugin/pl_player/models/double_tap_type.dart';
@@ -131,7 +133,7 @@ class PLVideoPlayer extends StatefulWidget {
 class _PLVideoPlayerState extends State<PLVideoPlayer>
     with WidgetsBindingObserver, TickerProviderStateMixin {
   late AnimationController _animationController;
-  late VideoController videoController;
+  late VideoController? videoController;
   late final CommonIntroController introController = widget.introController!;
   late final VideoDetailController videoDetailController =
       widget.videoDetailController!;
@@ -265,7 +267,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       vsync: this,
       duration: const Duration(milliseconds: 100),
     );
-    videoController = plPlayerController.videoController!;
+    videoController = plPlayerController.videoController;
 
     if (PlatformUtils.isMobile) {
       Future.microtask(() {
@@ -340,12 +342,12 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       if (const <AppLifecycleState>[.paused, .detached].contains(state)) {
         if (player != null && player.state.playing) {
           _pauseDueToPauseUponEnteringBackgroundMode = true;
-          player.pause();
+          plPlayerController.pause();
         }
       } else {
         if (_pauseDueToPauseUponEnteringBackgroundMode) {
           _pauseDueToPauseUponEnteringBackgroundMode = false;
-          player?.play();
+          plPlayerController.play();
         }
       }
     }
@@ -1369,13 +1371,13 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
         if (widget.danmuWidget case final danmaku?)
           Positioned.fill(top: 4, child: danmaku),
 
-        if (!isLive)
+        if (!isLive && videoController != null)
           Positioned.fill(
             child: IgnorePointer(
               ignoring: !plPlayerController.enableDragSubtitle,
               child: Obx(
                 () => SubtitleView(
-                  controller: videoController,
+                  controller: videoController!,
                   configuration: plPlayerController.subtitleConfig.value,
                   enableDragSubtitle: plPlayerController.enableDragSubtitle,
                   onUpdatePadding: plPlayerController.onUpdatePadding,
@@ -2047,6 +2049,19 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
             child: Obx(
               () {
                 final videoFit = plPlayerController.videoFit.value;
+                final player = plPlayerController.videoPlayerController;
+                if (player is OfficialPlayer) {
+                  // A native SurfaceView must be laid out at its displayed size, not scaled from decoder pixels.
+                  return Center(
+                    child: IgnorePointer(
+                      // Playback gestures belong to the surrounding Flutter controls.
+                      child: OfficialVideo(
+                        player: player,
+                        aspectRatio: videoFit.aspectRatio,
+                      ),
+                    ),
+                  );
+                }
                 return Transform.flip(
                   flipX: plPlayerController.flipX.value,
                   flipY: plPlayerController.flipY.value,
