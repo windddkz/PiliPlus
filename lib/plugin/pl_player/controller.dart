@@ -141,10 +141,24 @@ class PlPlayerController
     return disposal;
   }
 
+  Future<void>? _cancelPreparingOfficial() {
+    final player = _videoPlayerController;
+    if (player is! OfficialPlayer || !player.isPreparing) return null;
+    // Unblock the current queue item before waiting for the next one.
+    _removeListeners();
+    _videoPlayerController = null;
+    _videoController = null;
+    return _disposeBackend(player);
+  }
+
   Future<void> suspendForAudioPage() {
-    ++_sourceRevision;
+    final revision = ++_sourceRevision;
     unawaited(audioSessionHandler?.release(this));
+    final stopping = _cancelPreparingOfficial();
     return _enqueuePlayer(() async {
+      await stopping;
+      if (_currentSource(revision)) _processing = false;
+      if (stopping != null) backendRevision.value++;
       final player = _videoPlayerController;
       if (player is! OfficialPlayer) {
         await player?.pause();
@@ -824,9 +838,13 @@ class PlPlayerController
     _processing = true;
     // Invalidate focus resume now; never wait for the focus queue from this queue.
     unawaited(audioSessionHandler?.release(this));
+    final stopping = _cancelPreparingOfficial();
     return _enqueuePlayer(() async {
       if (!_currentSource(revision)) return;
       try {
+        await stopping;
+        if (!_currentSource(revision)) return;
+        if (stopping != null) backendRevision.value++;
         this.isLive = isLive;
         _videoType = videoType ?? VideoType.ugc;
         this.width = width;
@@ -1048,6 +1066,7 @@ class PlPlayerController
     Duration? seekTo,
     Volume? volume,
   ) async {
+    final revision = _sourceRevision;
     isBuffering.value = false;
     _heartDuration = 0;
     danmakuController?.clear();
@@ -1056,7 +1075,7 @@ class PlPlayerController
 
     if (player == null) {
       player = await _initPlayer();
-      if (_playerCount == 0) {
+      if (!_currentSource(revision)) {
         _removeListeners();
         await _disposeBackend(player);
         player = null;
@@ -1086,13 +1105,16 @@ class PlPlayerController
           userAgent: BrowserUa.pc,
           referer: HttpString.baseUrl,
         );
-        if (_playerCount > 0 &&
+        if (_currentSource(revision) &&
             identical(_videoPlayerController, player) &&
             player.initialSeekTimedOut) {
           SmartDialog.showToast('起播定位超时，将从实际到达的位置播放，可重新拖动');
         }
       } catch (error) {
-        if (_playerCount == 0) return;
+        if (!_currentSource(revision) ||
+            !identical(_videoPlayerController, player)) {
+          return;
+        }
         if (OfficialPlayer.isResourceFailure(error)) rethrow;
         await _switchToMpv('官方开片失败：${OfficialPlayer.failureCode(error)}');
       }
