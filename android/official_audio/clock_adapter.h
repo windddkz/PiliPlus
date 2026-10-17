@@ -48,5 +48,7 @@ static int player_instructions_ready(void){
     return FIELD((void *)base,0x14898c,uint32_t)==0xd503201f &&
         FIELD((void *)base,0x1a93c4,uint32_t)==0x9b0a7d29 &&
         FIELD((void *)base,0x1a93c8,uint32_t)==0x9ac80928 &&
-        FIELD((void *)base,0x18b488,uint32_t)==0xd503201f;
+        FIELD((void *)base,0x18b488,uint32_t)==0xd503201f &&
+        FIELD((void *)base,0x139e98,uint32_t)==0xd503201f &&
+        FIELD((void *)base,0x139ea4,uint32_t)==0xb90013f6;
 }

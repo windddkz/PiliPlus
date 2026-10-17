@@ -125,7 +125,9 @@ final class OfficialRuntime {
             // AudioGraph accepts 0.25x; the renderer otherwise silently rejects it before reaching the graph.
             {0x156c38,0x1e2c1000,0x1e2a1000},
             // Match the official legacy reader's 10ms EAGAIN retry; retain EOF and queue backpressure waits.
-            {0x129390,0x52800c89,0x52800149},{0x129398,0x7101911f,0x7100291f}};
+            {0x129390,0x52800c89,0x52800149},{0x129398,0x7101911f,0x7100291f},
+            // Count decoded frames of the limiting stream; otherwise queued audio can trigger false starvation.
+            {0x139e98,0x35000156,0xd503201f},{0x139ea4,0xb90013ff,0xb90013f6}};
         for(int[] change:changes){
             if(code.getInt(change[0])!=change[1])throw new SecurityException("Player instruction mismatch");
             code.putInt(change[0],change[2]);

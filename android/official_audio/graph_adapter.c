@@ -233,7 +233,8 @@ static int replace_stretcher(int install){
     return replace((uintptr_t *)(base+0x2ca920),install?old:next,install?next:old);
 }
 #include "video_trace.h"
-static int (*const changes[])(int)={replace_source,replace_decoder,replace_clock_timestamp,replace_video_trace,replace_stretcher,replace_reset_flush,replace_timeline_flush,replace_timeline_reset,replace_clock_resume};
+#include "audio_buffer.h"
+static int (*const changes[])(int)={replace_source,replace_decoder,replace_clock_timestamp,replace_video_trace,replace_stretcher,replace_reset_flush,replace_timeline_flush,replace_timeline_reset,replace_clock_resume,replace_audio_buffer};
 static int installed;
 static void restore(JNIEnv *env){
     while(installed){
@@ -269,7 +270,7 @@ JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_startGraphAdapter(J
     soundtouch_setting=dlsym(stretch_lib,"_ZN10soundtouch10SoundTouch10setSettingEii");
     dlclose(stretch_lib);
     if(!soundtouch_constructor||!soundtouch_setting){lp_close();fail(env,"Original stretcher APIs unavailable");return;}
-    stretch_error=0;
+    stretch_error=0;audio_buffer_adjustments=0;
     decoded_audio_codec=AV_CODEC_ID_NONE;
     lp_profile=loudness_enabled?1:0;lp_metadata_gain_db=gain_db;clock_diagnostics=diagnostics;video_trace_enabled=video_diagnostics;
     original=(Read)(base+0x159d70);enabled=trim_eof=1;errors=0;
