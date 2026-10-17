@@ -136,6 +136,14 @@ class LiveRoomController extends GetxController {
   String? videoUrl;
   NetworkSource? _liveSource;
   int _liveUrlRequest = 0;
+  int _liveQueryRequest = 0;
+
+  void cancelPendingLiveQuery() => ++_liveQueryRequest;
+
+  bool get ownsLiveSource =>
+      _liveSource != null &&
+      identical(plPlayerController.dataSource, _liveSource);
+
   bool? isPlaying;
   late bool isFullScreen = false;
 
@@ -232,10 +240,10 @@ class LiveRoomController extends GetxController {
   }
 
   Future<void> queryLiveUrl({bool autoFullScreenFlag = false}) async {
-    final request = ++_liveUrlRequest;
+    final request = ++_liveQueryRequest;
     final requestedRoom = roomId;
     bool current() =>
-        !isClosed && request == _liveUrlRequest && roomId == requestedRoom;
+        !isClosed && request == _liveQueryRequest && roomId == requestedRoom;
     final quality =
         currentQn ??
         (await ConnectivityUtils.isWiFi
@@ -324,6 +332,7 @@ class LiveRoomController extends GetxController {
     int codecIndex = 0,
     int liveUrlIndex = 0,
   }) {
+    cancelPendingLiveQuery();
     final request = ++_liveUrlRequest;
     this.streamIndex = streamIndex;
     this.formatIndex = formatIndex;

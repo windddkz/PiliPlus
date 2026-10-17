@@ -379,7 +379,7 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
   // 离开当前页面时
   void didPushNext() {
     super.didPushNext();
-    isShowing = false;
+    setState(() => isShowing = false);
 
     removeObserverMobile(this);
 
@@ -405,14 +405,16 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
 
   @override
   // 返回当前页面时
-  void didPopNext() {
+  Future<void> didPopNext() async {
     super.didPopNext();
 
     if (videoDetailController.plPlayerController.isCloseAll) {
       return;
     }
 
-    isShowing = true;
+    setState(() => isShowing = true);
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !isShowing) return;
 
     addObserverMobile(this);
 
@@ -456,6 +458,12 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
         videoDetailController.videoUrl != null) {
       videoDetailController.playerInit();
     }
+  }
+
+  @override
+  void didPop() {
+    setState(() => isShowing = false);
+    super.didPop();
   }
 
   @override
@@ -1224,7 +1232,8 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
         final controller = videoDetailController.plPlayerController;
         final hasOutput = controller.hasVideoOutput;
         final mountOfficial = controller.needsOfficialVideoSurface;
-        return ((!videoDetailController.videoState.value ||
+        return !isShowing ||
+                ((!videoDetailController.videoState.value ||
                         !videoDetailController.autoPlay) &&
                     !mountOfficial) ||
                 !hasOutput

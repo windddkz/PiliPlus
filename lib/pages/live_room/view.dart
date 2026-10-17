@@ -72,6 +72,7 @@ class _LiveRoomPageState extends State<LiveRoomPage>
   final String heroTag = Utils.generateRandomString(6);
   late final LiveRoomController _liveRoomController;
   late final PlPlayerController plPlayerController;
+  bool _isShowing = true;
   bool get isFullScreen => plPlayerController.isFullScreen.value;
 
   late final GlobalKey pageKey = GlobalKey();
@@ -116,6 +117,9 @@ class _LiveRoomPageState extends State<LiveRoomPage>
 
   @override
   Future<void> didPopNext() async {
+    setState(() => _isShowing = true);
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !_isShowing) return;
     addObserverMobile(this);
     if (!plPlayerController.isLive) {
       plPlayerController.isLive = true;
@@ -126,7 +130,7 @@ class _LiveRoomPageState extends State<LiveRoomPage>
     PlPlayerController.setPlayCallBack(plPlayerController.play);
     _liveRoomController.startLiveTimer();
     if (plPlayerController.playerStatus.isPlaying &&
-        plPlayerController.cid == null) {
+        _liveRoomController.ownsLiveSource) {
       _liveRoomController
         ..danmakuController?.resume()
         ..startLiveMsg();
@@ -137,7 +141,11 @@ class _LiveRoomPageState extends State<LiveRoomPage>
           ..danmakuController?.resume()
           ..startLiveMsg();
       }
-      await _liveRoomController.playerInit(autoplay: shouldPlay);
+      if (_liveRoomController.videoUrl == null) {
+        await _liveRoomController.queryLiveUrl();
+      } else {
+        await _liveRoomController.playerInit(autoplay: shouldPlay);
+      }
     }
     if (!mounted) return;
     plPlayerController.addStatusLister(playerListener);
@@ -146,14 +154,22 @@ class _LiveRoomPageState extends State<LiveRoomPage>
 
   @override
   void didPushNext() {
+    setState(() => _isShowing = false);
     removeObserverMobile(this);
     plPlayerController.removeStatusLister(playerListener);
     _liveRoomController
+      ..cancelPendingLiveQuery()
       ..danmakuController?.clear()
       ..cancelLiveTimer()
       ..closeLiveMsg()
       ..isPlaying = plPlayerController.playerStatus.isPlaying;
     super.didPushNext();
+  }
+
+  @override
+  void didPop() {
+    setState(() => _isShowing = false);
+    super.didPop();
   }
 
   void playerListener(PlayerStatus status) {
@@ -177,7 +193,6 @@ class _LiveRoomPageState extends State<LiveRoomPage>
     if (Platform.isAndroid && !plPlayerController.setSystemBrightness) {
       ScreenBrightnessPlatform.instance.resetApplicationScreenBrightness();
     }
-    PlPlayerController.setPlayCallBack(null);
     plPlayerController
       ..removeStatusLister(playerListener)
       ..dispose();
@@ -259,7 +274,8 @@ class _LiveRoomPageState extends State<LiveRoomPage>
         final hasOutput = plPlayerController.hasVideoOutput;
         final mountOfficial = plPlayerController.needsOfficialVideoSurface;
         // The official player needs its Surface before preparation can finish.
-        if ((_liveRoomController.isLoaded.value || mountOfficial) &&
+        if (_isShowing &&
+            (_liveRoomController.isLoaded.value || mountOfficial) &&
             hasOutput &&
             plPlayerController.isLive) {
           final roomInfoH5 = _liveRoomController.roomInfoH5.value;
