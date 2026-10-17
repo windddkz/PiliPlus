@@ -191,6 +191,7 @@ final class OfficialRuntime {
             bridge("registerDsp");
             bridge("installMediaInspection");
             bridge("installFirstSeek");
+            bridge("installMediaDash");
             Object params=cls("com.bilibili.ijk.player.IJKNativeParams").getField("INSTANCE").get(null);
             List<?> keys=(List<?>)invoke(params,"nativeKeys$srcs_base_ijk_ijk_library_android");
             if(!keys.contains("ijk.audio_engine.enable"))throw new IllegalStateException("Audio engine option unavailable");
