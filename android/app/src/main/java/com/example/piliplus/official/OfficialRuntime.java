@@ -1871,8 +1871,10 @@ final class OfficialRuntime {
                                                    100.0 * (position + Math.max(0, buffered))
                                                            / duration))
                                  : 0);
-            b.putString("audioCodec", dsp.getString("audio_codec"));
-            b.putBoolean("dolbyControlsApplicable", dsp.getInt("configured_decoders") > 0);
+            String audioCodec = graph.getString("audio_codec");
+            b.putString("audioCodec", audioCodec);
+            b.putBoolean("dolbyControlsApplicable",
+                    audioCodec.equals("ijkac3") || audioCodec.equals("ijkeac3"));
             b.putLong("nativeDolbyEndpoint", dsp.getInt("endpoint"));
             b.putInt("appliedDolbyEndpoint", dsp.getInt("applied_endpoint"));
             b.putInt("dolbyEndpointUpdates", dsp.getInt("endpoint_updates"));

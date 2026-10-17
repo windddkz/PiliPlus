@@ -110,6 +110,7 @@ static int (*receive_original)(void *, AVFrame *);
 static void (*flush_original)(void *);
 static int filter_tid, source_tid;
 static int decoded_audio_codec;
+static const char *decoded_audio_name;
 static int codec_bypasses_loudness(int codec) {
     // Official 9.14 audio_thread supplies no custom af for these Dolby codecs.
     return codec == AV_CODEC_ID_AC3 || codec == AV_CODEC_ID_EAC3 || codec == AV_CODEC_ID_AC4;
@@ -118,7 +119,9 @@ static int receive_adapted(void *context, AVFrame *frame) {
     int rc = receive_original(context, frame);
     if (rc < 0 || frame->sample_rate <= 0 || frame->nb_samples <= 0)
         return rc;
-    // One audio stream per owned player; a source change recreates the player.
+    // Preloader lookups do not identify the stream that is producing audio frames.
+    const AVCodec *codec = ((AVCodecContext *)context)->codec;
+    __atomic_store_n(&decoded_audio_name, codec ? codec->name : NULL, __ATOMIC_RELEASE);
     __atomic_store_n(&decoded_audio_codec, ((AVCodecContext *)context)->codec_id, __ATOMIC_RELEASE);
     return rc;
 }
@@ -501,6 +504,7 @@ JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_startGraphAdapter(
     stretch_error = 0;
     audio_buffer_adjustments = 0;
     decoded_audio_codec = AV_CODEC_ID_NONE;
+    decoded_audio_name = NULL;
     lp_profile = loudness_enabled ? 1 : 0;
     lp_metadata_gain_db = gain_db;
     clock_diagnostics = diagnostics;
@@ -540,10 +544,11 @@ JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_getGraphState(JN
     (void)cls;
     pthread_mutex_lock(&lp_lock);
     pthread_mutex_lock(&lock);
-    char out[512];
+    const char *codec = __atomic_load_n(&decoded_audio_name, __ATOMIC_ACQUIRE);
+    char out[640];
     snprintf(
         out, sizeof(out),
-        "{\"active\":%s,\"errors\":%d,\"filter_error\":%d,\"sample_rate\":%d,\"channels\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"duplicate_eof_frames\":%llu,\"loudness_bypassed_for_codec\":%s}",
+        "{\"active\":%s,\"errors\":%d,\"filter_error\":%d,\"sample_rate\":%d,\"channels\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"duplicate_eof_frames\":%llu,\"loudness_bypassed_for_codec\":%s,\"audio_codec\":\"%.64s\"}",
         active ? "true" : "false",
         errors + __atomic_load_n(&stretch_error, __ATOMIC_RELAXED) +
             (__atomic_load_n(&decoder_reset_error, __ATOMIC_RELAXED) != 0) +
@@ -553,7 +558,8 @@ JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_getGraphState(JN
         lp_profile &&
                 codec_bypasses_loudness(__atomic_load_n(&decoded_audio_codec, __ATOMIC_ACQUIRE))
             ? "true"
-            : "false");
+            : "false",
+        codec ? codec : "");
     pthread_mutex_unlock(&lock);
     pthread_mutex_unlock(&lp_lock);
     return (*env)->NewStringUTF(env, out);
