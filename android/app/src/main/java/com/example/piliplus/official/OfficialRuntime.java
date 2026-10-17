@@ -568,9 +568,8 @@ final class OfficialRuntime {
                 invoke(player,(String)binding[0],callback((Integer)binding[1],(String)binding[2],token));
             boolean audioOnly=request.getBoolean("audioOnly",false);
             invoke(player,"setAudioOnly",audioOnly);invoke(player,"setVolume",volume);speed(speed);
-            if(preloads!=null)preloads.discardExcept(cacheKey);
             NativeMedia cached=preloads==null?null:preloads.peek(cacheKey);
-            if(cached==null && preloads!=null)preloads.discard(cacheKey);
+            if(cached==null && preloads!=null)preloads.discardExcept(null);
             DashSource[] tracks=null;
             if(cached==null && pendingProbe!=null){
                 stage("dash_probe");tracks=pendingProbe.await();
@@ -588,7 +587,9 @@ final class OfficialRuntime {
             configureOutput(media.hdr);
             if(cached!=null){
                 awaitingPreload=token;
-                if(preloads.take(cacheKey,ready->consumePreload(ready,token,request)))return;
+                boolean taken=preloads.take(cacheKey,ready->consumePreload(ready,token,request));
+                preloads.discardExcept(cacheKey);
+                if(taken)return;
                 awaitingPreload=0;
             }
             useItem(nativeItem(media.asset,0),token,request);
@@ -642,6 +643,8 @@ final class OfficialRuntime {
         boolean taken=cached?preloads.take(key,ready->consumePreload(ready,token,request)):
             preloads.takeReady(key,ready->consumePreload(ready,token,request));
         if(!taken)throw new IOException("Native metadata handoff unavailable");
+        // Detach shares the native queue with potentially slow closes of unused candidates.
+        if(cached)preloads.discardExcept(key);
     }
     private void configureOutput(boolean hdr) throws Exception {
         Bundle request=openRequest;Surface surface=outputSurface;
