@@ -590,7 +590,7 @@ void _showBufferSecDialog(BuildContext context, VoidCallback setState) =>
 
 const _officialLoudnessModes = {
   'off': '关闭',
-  'normal': '普通目标',
+  'normal': '标准模式',
   'high_dynamic': '高动态场景目标（不是额外压缩）',
 };
 
