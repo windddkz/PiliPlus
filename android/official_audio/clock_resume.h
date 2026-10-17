@@ -10,27 +10,30 @@ static void clear_clock_resume(void){
     clock_resume_pending=NULL;clock_resume_since=0;clock_resume_paused=0;
     pthread_mutex_unlock(&clock_resume_lock);
 }
-static void mark_clock_lifecycle(void *engine,int paused){
+static void mark_clock_lifecycle(void *engine,int paused,int require_pending){
     void *sink=FIELD(engine,0x88,void *);
     void *tracker=sink?FIELD(sink,0x60,void *):NULL;
     void *clock=tracker?FIELD(tracker,0x20,void *):NULL;
     if(clock&&FIELD(clock,0,uintptr_t)==base+0x2b9b30){
         pthread_mutex_lock(&clock_resume_lock);
-        clock_resume_pending=clock;clock_resume_since=(int64_t)(monotonic_ns()/1000);
-        clock_resume_paused=paused;
+        if(!require_pending||clock_resume_pending==clock){
+            clock_resume_pending=clock;clock_resume_since=(int64_t)(monotonic_ns()/1000);
+            clock_resume_paused=paused;
+        }
         pthread_mutex_unlock(&clock_resume_lock);
     }
 }
 static int play_with_clock_resume(void *engine){
-    int paused=FIELD(engine,0xb8,int)==3;
+    int previous=FIELD(engine,0xb8,int);
     int rc=clock_play_original(engine);
-    if(!rc&&paused)mark_clock_lifecycle(engine,0);
+    // Seek flush changes Paused to Prepared; its pending clock still needs resume handling.
+    if(!rc&&previous!=2)mark_clock_lifecycle(engine,0,previous!=3);
     return rc;
 }
 static int pause_with_clock_resume(void *engine){
     int playing=FIELD(engine,0xb8,int)==2;
     int rc=clock_pause_original(engine);
-    if(!rc&&playing)mark_clock_lifecycle(engine,1);
+    if(!rc&&playing)mark_clock_lifecycle(engine,1,0);
     return rc;
 }
 static int resume_clock_timestamp(void *state,int valid,int64_t frames,int64_t stamp,int64_t now){

@@ -77,5 +77,16 @@ int main(void){
  assert(clock_estimate_time(clock_state,3500001)==3500001&&!clock_resume_pending&&!FIELD(clock_state,0x39,unsigned char));
  setup(0);play_with_clock_resume(engine);pause_with_clock_resume(engine);FIELD(clock_state,0x48,int64_t)=2000000;
  assert(clock_estimate_time(clock_state,33000000)==2000000&&clock_resume_paused);
- puts("PASS: lifecycle success/failure, paused sampling, small future timestamps, stale/regressing rejection, one-shot resume and preserved monotonic bound");
+ // Native seek flush changes Paused to Prepared before Play reaches this wrapper.
+ FIELD(engine,0xb8,int)=1;tick=34000000000;
+ assert(play_with_clock_resume(engine)==0&&!clock_resume_paused);
+ assert(clock_resume_pending==clock_state&&clock_resume_since==34000000);
+ tick=34001000000;assert(play_with_clock_resume(engine)==0&&clock_resume_since==34000000);
+ assert(resume_clock_timestamp(clock_state,1,97000,34010000,34010000)==1);
+ assert(clock_estimate_time(clock_state,34100000)==34100000&&!clock_resume_pending);
+ setup(0);play_with_clock_resume(engine);pause_with_clock_resume(engine);FIELD(engine,0xb8,int)=1;
+ error=-5;assert(play_with_clock_resume(engine)==-5&&clock_resume_paused);
+ error=0;FIELD(tracker,0x20,void *)=other;FIELD(other,0,uintptr_t)=base+0x2b9b30;
+ assert(play_with_clock_resume(engine)==0&&clock_resume_pending==clock_state&&clock_resume_paused);
+ puts("PASS: lifecycle success/failure, seek Prepared resume, repeated Play, clock ownership, paused sampling, timestamp rejection and preserved monotonic bound");
 }
