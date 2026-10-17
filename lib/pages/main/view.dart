@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:PiliPlus/common/assets.dart';
@@ -12,6 +13,7 @@ import 'package:PiliPlus/models/common/nav_bar_config.dart';
 import 'package:PiliPlus/pages/home/view.dart';
 import 'package:PiliPlus/pages/main/controller.dart';
 import 'package:PiliPlus/plugin/pl_player/controller.dart';
+import 'package:PiliPlus/plugin/pl_player/official_player.dart';
 import 'package:PiliPlus/utils/android/bindings.g.dart';
 import 'package:PiliPlus/utils/app_scheme.dart';
 import 'package:PiliPlus/utils/device_utils.dart';
@@ -22,6 +24,7 @@ import 'package:PiliPlus/utils/mobile_observer.dart';
 import 'package:PiliPlus/utils/platform_utils.dart';
 import 'package:PiliPlus/utils/storage.dart';
 import 'package:PiliPlus/utils/storage_key.dart';
+import 'package:PiliPlus/utils/storage_pref.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:material_ui/material_ui.dart';
@@ -65,6 +68,27 @@ class _MainAppState extends PopScopeState<MainApp>
     if (!Platform.isMacOS) {
       PiliScheme.init();
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _warmUpOfficial());
+  }
+
+  void _warmUpOfficial() {
+    if (!mounted ||
+        !Platform.isAndroid ||
+        ModalRoute.of(context)?.isCurrent != true ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed ||
+        !Pref.officialAudioBackend ||
+        !Pref.preInitPlayer ||
+        Pref.audioNormalization != '0' ||
+        Pref.playerVolume > 100) {
+      return;
+    }
+    unawaited(
+      OfficialPlayer.warmUpWhenIdle().catchError((Object error) {
+        debugPrint(
+          'Idle official warm-up skipped: ${OfficialPlayer.failureCode(error)}',
+        );
+      }),
+    );
   }
 
   @override
@@ -94,6 +118,7 @@ class _MainAppState extends PopScopeState<MainApp>
       ..checkDefaultSearch(true)
       ..checkUnread(_mainController.useBottomNav);
     super.didPopNext();
+    _warmUpOfficial();
   }
 
   @override
@@ -105,6 +130,7 @@ class _MainAppState extends PopScopeState<MainApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      _warmUpOfficial();
       _mainController
         ..checkUnreadDynamic()
         ..checkDefaultSearch(true)

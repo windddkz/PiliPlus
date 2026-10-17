@@ -46,6 +46,118 @@ void main() {
   Future<OfficialPlayer> create() => OfficialPlayer.create(
     (reason) => throw StateError('Unexpected fallback: $reason'),
   );
+  test(
+    'idle warm-up releases before real create, without opening media',
+    () async {
+      final warming = Completer<void>();
+      messenger.setMockMethodCallHandler(commands, (call) async {
+        calls.add(call);
+        return switch (call.method) {
+          'availability' => {'available': true},
+          'create' => {'session': 7},
+          'warmUp' => warming.future,
+          _ => null,
+        };
+      });
+      final first = OfficialPlayer.warmUpWhenIdle();
+      final repeated = OfficialPlayer.warmUpWhenIdle();
+      await Future<void>.delayed(Duration.zero);
+      final real = create();
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.map((c) => c.method), ['availability', 'create', 'warmUp']);
+      warming.complete();
+      await Future.wait([first, repeated]);
+      final player = await real;
+      expect(calls.map((c) => c.method), [
+        'availability',
+        'create',
+        'warmUp',
+        'dispose',
+        'availability',
+        'create',
+      ]);
+      await player.dispose();
+    },
+  );
+  test('idle warm-up does not take a live player event channel', () async {
+    final player = await create();
+    await OfficialPlayer.warmUpWhenIdle();
+    expect(calls.map((c) => c.method), ['availability', 'create']);
+    await emit({'event': 'error', 'error': 'native_process_died', 'load': 0});
+    expect(player.processDead, true);
+    await player.dispose();
+  });
+  test('idle warm-up does not overtake a pending real create', () async {
+    final ready = Completer<Map<String, Object?>>();
+    messenger.setMockMethodCallHandler(commands, (call) async {
+      calls.add(call);
+      return switch (call.method) {
+        'availability' => ready.future,
+        'create' => {'session': 7},
+        _ => null,
+      };
+    });
+    final real = create();
+    await OfficialPlayer.warmUpWhenIdle();
+    ready.complete({'available': true});
+    final player = await real;
+    expect(calls.map((c) => c.method), ['availability', 'create']);
+    await player.dispose();
+  });
+  test(
+    'failed idle warm-up releases and does not fail a waiting create',
+    () async {
+      final warming = Completer<void>();
+      messenger.setMockMethodCallHandler(commands, (call) async {
+        calls.add(call);
+        return switch (call.method) {
+          'availability' => {'available': true},
+          'create' => {'session': 7},
+          'warmUp' => warming.future,
+          _ => null,
+        };
+      });
+      final idle = OfficialPlayer.warmUpWhenIdle();
+      final failure = expectLater(idle, throwsA(isA<PlatformException>()));
+      await Future<void>.delayed(Duration.zero);
+      final real = create();
+      warming.completeError(PlatformException(code: 'native_command_failed'));
+      await failure;
+      final player = await real;
+      expect(calls.map((c) => c.method), [
+        'availability',
+        'create',
+        'warmUp',
+        'dispose',
+        'availability',
+        'create',
+      ]);
+      await player.dispose();
+    },
+  );
+  test('unconfirmed idle release still blocks a waiting real create', () async {
+    var stopped = false;
+    messenger.setMockMethodCallHandler(commands, (call) async {
+      calls.add(call);
+      if (call.method == 'dispose' && !stopped) {
+        throw PlatformException(code: 'stop_unconfirmed');
+      }
+      return switch (call.method) {
+        'availability' => {'available': true},
+        'create' => {'session': 7},
+        _ => null,
+      };
+    });
+    final idle = OfficialPlayer.warmUpWhenIdle();
+    final failure = expectLater(idle, throwsA(isA<PlatformException>()));
+    await expectLater(create(), throwsA(isA<PlatformException>()));
+    await failure;
+    expect(calls.where((c) => c.method == 'create').length, 1);
+    stopped = true;
+    await emit({'event': 'error', 'error': 'native_process_died', 'load': 0});
+    final recovered = await create();
+    await recovered.dispose();
+  });
   test('warm-up never opens media or marks playback ready', () async {
     final p = await create();
     await p.warmUp();

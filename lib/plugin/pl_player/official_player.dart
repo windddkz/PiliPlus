@@ -102,6 +102,33 @@ class OfficialPlayer extends PlatformPlayer {
 
   static Future<void>? _pendingDisposal;
   static final _stoppingPlayers = <OfficialPlayer>{};
+  static final _livePlayers = <OfficialPlayer>{};
+  static Future<void>? _idleWarmup;
+  static int _creatingPlayers = 0;
+
+  static Future<void> warmUpWhenIdle() {
+    if (_idleWarmup case final pending?) return pending;
+    if (_creatingPlayers != 0 || _livePlayers.isNotEmpty) {
+      return Future.value();
+    }
+    final pending = _idleWarmup = _warmUpAndRelease();
+    void clear() {
+      if (identical(_idleWarmup, pending)) _idleWarmup = null;
+    }
+
+    unawaited(pending.then((_) => clear(), onError: (Object _) => clear()));
+    return pending;
+  }
+
+  static Future<void> _warmUpAndRelease() async {
+    OfficialPlayer? player;
+    try {
+      player = await _create((reason) => Future.error(StateError(reason)));
+      await player.warmUp();
+    } finally {
+      await player?.dispose();
+    }
+  }
 
   static Future<void> waitForDisposal() async {
     await _pendingDisposal;
@@ -133,6 +160,21 @@ class OfficialPlayer extends PlatformPlayer {
   static Future<OfficialPlayer> create(
     Future<PlatformPlayer> Function(String reason) fallback,
   ) async {
+    _creatingPlayers++;
+    try {
+      // Optional preparation may fail; an unconfirmed stop still blocks _create.
+      try {
+        await _idleWarmup;
+      } catch (_) {}
+      return await _create(fallback);
+    } finally {
+      _creatingPlayers--;
+    }
+  }
+
+  static Future<OfficialPlayer> _create(
+    Future<PlatformPlayer> Function(String reason) fallback,
+  ) async {
     await waitForDisposal();
     final availability = await _channel.invokeMapMethod<String, dynamic>(
       'availability',
@@ -151,6 +193,7 @@ class OfficialPlayer extends PlatformPlayer {
       final result = await _channel.invokeMapMethod<String, dynamic>('create');
       player.session = result!['session'] as int;
       player.completer.complete();
+      _livePlayers.add(player);
       return player;
     } catch (_) {
       await player._events.cancel();
@@ -676,6 +719,7 @@ class OfficialPlayer extends PlatformPlayer {
           await _rateUpdates.close();
           await super.dispose();
           _stoppingPlayers.remove(this);
+          _livePlayers.remove(this);
         })
         .onError<Object>((error, stack) {
           // A later Binder death can confirm a previously timed-out native stop.
