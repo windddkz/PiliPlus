@@ -8,10 +8,11 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <stdatomic.h>
-#include <libavcodec/codec.h>
+#include <libavcodec/avcodec.h>
 #include <libavutil/opt.h>
 #include "slot_pair.h"
 #include "dolby_decoder_policy.h"
+#include "dolby_endpoint.h"
 static uintptr_t player_base;static int player_matches;
 static int locate_player(struct dl_phdr_info *i,size_t n,void *p){(void)n;(void)p;const char *s=strrchr(i->dlpi_name,'/');s=s?s+1:i->dlpi_name;if(!strcmp(s,"libijk.so")){player_base=i->dlpi_addr;player_matches++;}return 0;}
 static int matches_player(void *find){player_base=0;player_matches=0;dl_iterate_phdr(locate_player,NULL);return player_matches==1&&*(void **)(player_base+0x2ca600)==find;}
@@ -35,6 +36,7 @@ JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_registerDsp(JNIE
   reg[i]=dlsym(runtime.lib,symbols[i][0]);impl[i]=dlsym(runtime.ext,symbols[i][1]);target[i]=dlsym(runtime.lib,symbols[i][2]);
   if(!reg[i]||!impl[i]||!target[i]){close_runtime(&runtime);fail(e,"Original DSP registration symbols absent");return NULL;}
  }
+ if(prepare_endpoint_codecs(impl[0],impl[1])){close_runtime(&runtime);fail(e,"Unexpected Dolby callback ABI");return NULL;}
  unsigned char saved[3][192];for(int i=0;i<3;i++)memcpy(saved[i],target[i],sizes[i]);
  for(int i=0;i<3;i++)if(reg[i](impl[i],sizes[i])||memcmp(target[i],impl[i],sizes[i])){
   int restored=1;for(int j=0;j<=i;j++)if(reg[j](saved[j],sizes[j])||memcmp(target[j],saved[j],sizes[j]))restored=0;
@@ -54,8 +56,7 @@ static int (*original_open)(void *,const AVCodec *,void **);
 static int (*set_ptr)(void **,const char *,intptr_t,int);
 static int (*set_int)(void **,const char *,int64_t,int);
 static atomic_uint configured,open_failures;
-// Borrowed until decoder release; controls change by reopening the single owned player.
-static int32_t exec_params[9];
+
 static int routed_open(void *ctx,const AVCodec *codec,void **options){
  if(codec==dolby_ac3||codec==dolby_eac3){
   if(!options||set_int(options,"ijkeac3type",0,0)<0||set_ptr(options,"ijkeac3par",(intptr_t)exec_params,0)<0){atomic_fetch_add(&open_failures,1);return -22;}
@@ -88,8 +89,11 @@ static const char *prepare_route(int endpoint,int virtualizer,int hardware_dolby
  if(!named||!ac3||!eac3||!original_open||!set_ptr||!set_int)return "Original option bridge unavailable";
  dolby_ac3=named("ijkac3");dolby_eac3=named("ijkeac3");
  if(!dolby_ac3||!dolby_eac3||dolby_ac3->id!=86019||dolby_eac3->id!=86056||memcmp(dolby_ac3,ac3,192)||memcmp(dolby_eac3,eac3,192))return "Original Dolby decoders not registered";
+ // Player creation re-registers the public descriptors; retain our private callback copies.
+ dolby_ac3=&endpoint_codecs[1].p;dolby_eac3=&endpoint_codecs[0].p;
  // Official IjkMediaPlayerItem clears software enhancement when EAC3 MediaCodec is available.
  int32_t values[9]={endpoint,hardware_dolby?0:virtualizer,hardware_dolby?0:6,-14,65535,-32,0,0,0};memcpy(exec_params,values,sizeof(values));
+ atomic_store(&requested_endpoint,endpoint);atomic_store(&acknowledged_endpoint,0);atomic_store(&endpoint_updates,0);
  original_slots[0]=(uintptr_t)original_find;original_slots[1]=(uintptr_t)original_open;
  routed_slots[0]=(uintptr_t)routed_find;routed_slots[1]=(uintptr_t)routed_open;
  atomic_store(&selected_audio_codec,NULL);atomic_store(&configured,0);atomic_store(&open_failures,0);atomic_store(&routed_ac3,0);atomic_store(&routed_eac3,0);atomic_store(&delegated,0);
@@ -111,13 +115,18 @@ JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_finishDspRoute(J
  int rc=route_pair(0,mprotect);if(rc==-1)rc=route_pair(0,mprotect);
  if(rc)(*e)->FatalError(e,"DSP restore failed in owned process; refusing stale callbacks");
  if(software_policy(0))(*e)->FatalError(e,"Dolby decoder policy restoration failed");
- routing=0;close_runtime(&route_runtime);char result[300];snprintf(result,sizeof(result),"{\"ac3_calls\":%u,\"eac3_calls\":%u,\"delegated_calls\":%u,\"slot_restored\":true,\"configured_decoders\":%u,\"open_failures\":%u,\"endpoint\":%d,\"virtualizer\":%d,\"owned_handles\":%d}",atomic_load(&routed_ac3),atomic_load(&routed_eac3),atomic_load(&delegated),atomic_load(&configured),atomic_load(&open_failures),exec_params[0],exec_params[1],owned_handles);
+ routing=0;close_runtime(&route_runtime);char result[300];snprintf(result,sizeof(result),"{\"ac3_calls\":%u,\"eac3_calls\":%u,\"delegated_calls\":%u,\"slot_restored\":true,\"configured_decoders\":%u,\"open_failures\":%u,\"endpoint\":%d,\"virtualizer\":%d,\"owned_handles\":%d}",atomic_load(&routed_ac3),atomic_load(&routed_eac3),atomic_load(&delegated),atomic_load(&configured),atomic_load(&open_failures),atomic_load(&requested_endpoint),exec_params[1],owned_handles);
  return (*e)->NewStringUTF(e,result);
+}
+
+JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_updateDspEndpoint(JNIEnv *e,jclass cls,jint endpoint){
+ (void)cls;if(!routing || (endpoint!=1 && endpoint!=2)){fail(e,"Invalid active DSP endpoint");return;}
+ atomic_store(&requested_endpoint,endpoint);
 }
 
 JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_getDspState(JNIEnv *e,jclass cls){
  (void)cls;if(!routing){fail(e,"DSP route is not active");return NULL;}
- const char *codec=atomic_load(&selected_audio_codec);char result[256];
- snprintf(result,sizeof(result),"{\"configured_decoders\":%u,\"open_failures\":%u,\"endpoint\":%d,\"audio_codec\":\"%.64s\"}",atomic_load(&configured),atomic_load(&open_failures),exec_params[0],codec?codec:"");
+ const char *codec=atomic_load(&selected_audio_codec);char result[512];
+ snprintf(result,sizeof(result),"{\"configured_decoders\":%u,\"open_failures\":%u,\"endpoint\":%d,\"applied_endpoint\":%d,\"endpoint_updates\":%u,\"audio_codec\":\"%.64s\"}",atomic_load(&configured),atomic_load(&open_failures),atomic_load(&requested_endpoint),atomic_load(&acknowledged_endpoint),atomic_load(&endpoint_updates),codec?codec:"");
  return (*e)->NewStringUTF(e,result);
 }

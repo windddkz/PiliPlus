@@ -236,7 +236,7 @@ final class OfficialRuntime {
             worker.post(()->run(token,()->{
                 switch(event) {
                     case "prepared":
-                        updateDisplaySize();prepared=true;stage("playback");if(route.endpoint()!=appliedEndpoint){applyRoute();break;}speed(speed);invoke(player,"setVolume",volume);
+                        updateDisplaySize();prepared=true;stage("playback");if(route.endpoint()!=appliedEndpoint)applyRoute();speed(speed);invoke(player,"setVolume",volume);
                         if(startPosition>0)invoke(player,"seekTo",true,startPosition,5000L);
                         if(wantedPlaying)invoke(player,"start");emit("prepared");heartbeat(token);break;
                     case "completed":wantedPlaying=false;emit("completed");break;
@@ -454,13 +454,18 @@ final class OfficialRuntime {
         return construct("com.bilibili.ijk.media.IJKDashStream",mediaType,(Integer)invoke(codec,"getId"),qn,track==null?0:track.bandwidth,source.url,track==null?Collections.emptyList():track.alternativesFor(source.url));
     }
     private void applyRoute() throws Exception {
-        if(route.endpoint()!=appliedEndpoint&&prepared) {
-            Bundle next=new Bundle(openRequest);next.putLong("position",next.getBoolean("isLive",false)?0:(Long)invoke(player,"getCurrentPosition"));
-            next.putBoolean("play",wantedPlaying);next.putFloat("speed",speed);next.putFloat("volume",volume);
-            Surface current=outputSurface;
-            Bundle event=new Bundle();event.putString("event","buffering");event.putBoolean("buffering",true);emit(event);
-            open(next,current);
-        } else describeRoute("route_changed");
+        applyEndpoint(route.endpoint());
+        describeRoute("route_changed");
+    }
+    private void applyEndpoint(int endpoint) throws Exception {
+        if(endpoint!=appliedEndpoint && prepared) {
+            bridge("updateDspEndpoint",endpoint);
+            appliedEndpoint=endpoint;
+        }
+    }
+    void testEndpoint(int endpoint) throws Exception {
+        if(!com.example.piliplus.BuildConfig.DEBUG)throw new SecurityException("Debug only");
+        applyEndpoint(endpoint);
     }
     private void describeRoute(String event) {Bundle data=new Bundle();data.putString("event",event);route.describe(data);emit(data);}
     private void heartbeat(long token) {
@@ -477,7 +482,7 @@ final class OfficialRuntime {
             long duration=b.getLong("duration"),position=b.getLong("position");
             b.putInt("bufferedPercent",duration>0?(int)Math.max(0,Math.min(100,100.0*(position+Math.max(0,buffered))/duration)):0);
             b.putString("audioCodec",dsp.getString("audio_codec"));b.putBoolean("dolbyControlsApplicable",dsp.getInt("configured_decoders")>0);
-            b.putLong("nativeDolbyEndpoint",dsp.getInt("endpoint"));b.putInt("sampleRate",graph.getInt("sample_rate"));
+            b.putLong("nativeDolbyEndpoint",dsp.getInt("endpoint"));b.putInt("appliedDolbyEndpoint",dsp.getInt("applied_endpoint"));b.putInt("dolbyEndpointUpdates",dsp.getInt("endpoint_updates"));b.putInt("sampleRate",graph.getInt("sample_rate"));
             b.putString("channelLayout",Integer.toString(graph.getInt("channels")));
             b.putString("loudnessMode",loudnessMode);b.putString("loudnessState",graph.getBoolean("loudness_bypassed_for_codec")?"dolby_codec_bypass":loudness.reason);b.putString("requestedAudioFilter",loudness.filter);
             b.putDouble("requestedLoudnessGainDb",loudness.appInGainDb);if(Double.isFinite(loudness.target))b.putDouble("loudnessTarget",loudness.target);

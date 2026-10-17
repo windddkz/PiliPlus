@@ -62,7 +62,7 @@ if a.fixtures:
     source = a.workspace / 'native-audio-poc/app/src/main/assets/samples'
     target = repo / 'android/app/src/debug/assets/official_fixture'
     target.mkdir(parents=True, exist_ok=True)
-    files = ['stereo-44100-16.flac', 'stereo-96000-24.flac', 'surround-soft.flac', 'stereo-48000-16.flac', 'dash-muxed.mp4', 'fragmented-dash-video.mp4',
+    files = ['endpoint-eac3.mp4', 'endpoint-flac.mp4', 'endpoint-aac.mp4', 'stereo-44100-16.flac', 'stereo-96000-24.flac', 'surround-soft.flac', 'stereo-48000-16.flac', 'dash-muxed.mp4', 'fragmented-dash-video.mp4',
              'fragmented-dash-audio.m4a', 'dash-video.mp4', 'dash-audio.m4a', 'surround-soft.eac3', 'surround-quiet.eac3', 'loudness-stereo.m4a', 'loudness-manifest.json', 'loudness-fragmented-audio.m4a', 'frame-id.mp4', 'he-aac-v2-48000.m4a', 'he-aac-v2-44100.m4a', 'he-aac-v2-48000-implicit.aac', 'he-aac-v2-manifest.json']
     hashes = {}
     for name in files:

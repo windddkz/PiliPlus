@@ -51,7 +51,7 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
         if (!BuildConfig.OFFICIAL_AUDIO) { finish(); return; }
         sample = getIntent().getStringExtra("sample");
         if (sample == null) sample = "stereo-48000-16.flac";
-        if (!Arrays.asList("live.flv", "live.m3u8", "stereo-44100-16.flac", "stereo-96000-24.flac", "surround-soft.flac", "stereo-48000-16.flac", "dash-muxed.mp4", "frame-id.mp4", "sync-fragmented", "surround-soft.eac3", "surround-quiet.eac3", "loudness-stereo.m4a", "sync-loudness", "he-aac-v2-48000.m4a", "he-aac-v2-44100.m4a", "he-aac-v2-48000-implicit.aac").contains(sample))
+        if (!Arrays.asList("endpoint-eac3.mp4", "endpoint-flac.mp4", "endpoint-aac.mp4", "live.flv", "live.m3u8", "stereo-44100-16.flac", "stereo-96000-24.flac", "surround-soft.flac", "stereo-48000-16.flac", "dash-muxed.mp4", "frame-id.mp4", "sync-fragmented", "surround-soft.eac3", "surround-quiet.eac3", "loudness-stereo.m4a", "sync-loudness", "he-aac-v2-48000.m4a", "he-aac-v2-44100.m4a", "he-aac-v2-48000-implicit.aac").contains(sample))
             throw new IllegalArgumentException("Owned fixtures only");
         rounds = getIntent().getBooleanExtra("cycles", false) ? 5 : 0;
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -102,6 +102,7 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
         } catch (Exception error) { throw new IllegalStateException(error); }
     }
     private void send(String op, Bundle data, Runnable reply) {
+        if (op.equals("close")) opened = false;
         if (!destroyed && bridge != null) { bridge.send(op,data,reply); return; }
         if (destroyed || service == null) return;
         data.putString("op", op); data.putLong("session", session);
@@ -161,6 +162,18 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
         if(event.equals("prepared") && startedSession!=session){
             startedSession=session;
             send("play",new Bundle(),null);if(rounds>0)cycle();
+            if(getIntent().getBooleanExtra("endpointProbe",false)) {
+                long token=session;
+                for(int i=0;i<4;i++) {
+                    final int endpoint=i%2==0?2:1;
+                    ui.postDelayed(()->{
+                        if(token!=session || destroyed || !opened)return;
+                        Bundle update=new Bundle();update.putInt("endpoint",endpoint);
+                        send("probeEndpoint",update,()->record("endpoint_requested",update));
+                    },1500+2000*i);
+                }
+            }
+
             if(bridge==null && getIntent().getBooleanExtra("repeatSurfaceAfterStart",false)){
                 long token=session;
                 ui.postDelayed(()->{
@@ -218,6 +231,8 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
                 track.putInt("bandwidth",0);track.putStringArrayList("backups",new ArrayList<>());source.putBundle("sourceTrack",track);
             }
             if (sample.equals("sync-fragmented")) source.putString("audio", asset("fragmented-dash-audio.m4a"));
+
+
             if (sample.equals("sync-loudness")) source.putString("audio", asset("loudness-fragmented-audio.m4a"));
             if(getIntent().getBooleanExtra("probeFallback",false)) {
                 if(!sample.equals("sync-fragmented"))throw new IllegalArgumentException("Network probe requires owned fragmented fixtures");

@@ -75,6 +75,7 @@ public final class OfficialPlaybackService extends Service {
                 case "surface": runtime.outputWindow(data); setSurface(data.getParcelable("surface")); break;
                 case "play": runtime.play(true); break;
                 case "pause": runtime.play(false); break;
+                case "probeEndpoint": runtime.testEndpoint(data.getInt("endpoint")); break;
                 case "mirror": runtime.mirror(data); break;
                 case "viewport": runtime.viewport(data); break;
                 case "resize": runtime.outputWindow(data); runtime.resize(); break;
