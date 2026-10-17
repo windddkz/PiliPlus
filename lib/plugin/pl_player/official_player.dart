@@ -37,6 +37,7 @@ class OfficialPlayer extends PlatformPlayer {
       error is PlatformException && error.code == 'resource_unavailable';
   Completer<void>? _preparing;
   bool _nativePrepared = false;
+  bool resourceUnavailable = false;
   bool initialSeekTimedOut = false;
   (int, double, double, int, int)? _videoTransform;
   int? _initialSeekTarget;
@@ -155,6 +156,31 @@ class OfficialPlayer extends PlatformPlayer {
     return _channel.invokeMethod<void>(method, {'session': session, ...data});
   }
 
+  static Map<String, Object?> _sourceArguments(
+    DataSource source,
+    bool audioOnly,
+  ) => {
+    'source': audioOnly && source.audioSource != null
+        ? source.audioSource
+        : source.videoSource,
+    if (!audioOnly) 'audio': source.audioSource,
+    if (source is NetworkSource) ...{
+      'sourceTrack': audioOnly && source.audioSource != null
+          ? source.audioTrack?.forSource(source.audioSource)
+          : source.videoTrack?.forSource(source.videoSource),
+      if (!audioOnly)
+        'audioTrack': source.audioTrack?.forSource(source.audioSource),
+    },
+  };
+
+  static bool _isProbeFailure(Object error) =>
+      error is PlatformException &&
+      error.code == 'native_command_failed' &&
+      error.details is String &&
+      RegExp(
+        r'^open_(video|audio)_probe_(IOException|EOFException|SocketTimeoutException|SocketException|ConnectException|UnknownHostException|SSLException|SSLHandshakeException)$',
+      ).hasMatch(error.details as String);
+
   Future<void> openSource(
     DataSource source, {
     Duration? position,
@@ -173,7 +199,8 @@ class OfficialPlayer extends PlatformPlayer {
     if (_preparing != null) {
       throw StateError('An official source is already preparing');
     }
-    ++_load;
+    var load = ++_load;
+    final original = source;
     _networkSource = source is NetworkSource ? source : null;
     _audioOnly = audioOnly;
     _refreshRequest = null;
@@ -185,6 +212,7 @@ class OfficialPlayer extends PlatformPlayer {
     _seekTail = Future<void>.value();
     _seekUncertain = false;
     _nativePrepared = false;
+    resourceUnavailable = false;
     initialSeekTimedOut = false;
     _initialSeekTarget = (position?.inMilliseconds ?? 0) > 0
         ? position!.inMilliseconds
@@ -205,32 +233,62 @@ class OfficialPlayer extends PlatformPlayer {
     audioCodec = '';
     bufferingController.add(true);
     try {
-      await _send('open', {
-        'load': _load,
-        'audioOnly': audioOnly,
-        'flipX': flipX,
-        'flipY': flipY,
-        'source': audioOnly && source.audioSource != null
-            ? source.audioSource
-            : source.videoSource,
-        if (!audioOnly) 'audio': source.audioSource,
-        if (source is NetworkSource) ...{
-          'sourceTrack': audioOnly && source.audioSource != null
-              ? source.audioTrack?.forSource(source.audioSource)
-              : source.videoTrack?.forSource(source.videoSource),
-          if (!audioOnly)
-            'audioTrack': source.audioTrack?.forSource(source.audioSource),
-        },
-        'position': position?.inMilliseconds ?? 0,
-        'speed': state.rate,
-        'volume': _outputVolume(state.volume),
-        'loudnessMode': loudnessMode,
-        'loudnessValues': loudnessValues,
-        'loudnessScenes': loudnessScenes,
-        'userAgent': userAgent,
-        'referer': referer,
-      });
+      for (var attempt = 0; ; attempt++) {
+        try {
+          await _send('open', {
+            'load': load,
+            'audioOnly': audioOnly,
+            'flipX': flipX,
+            'flipY': flipY,
+            ..._sourceArguments(source, audioOnly),
+            'position': position?.inMilliseconds ?? 0,
+            'speed': state.rate,
+            'volume': _outputVolume(state.volume),
+            'loudnessMode': loudnessMode,
+            'loudnessValues': loudnessValues,
+            'loudnessScenes': loudnessScenes,
+            'userAgent': userAgent,
+            'referer': referer,
+          });
+          break;
+        } catch (error) {
+          if (source is! NetworkSource || !_isProbeFailure(error)) rethrow;
+          NetworkSource? next;
+          if (attempt == 0 && source.refresh != null) {
+            try {
+              next = await Future.any<NetworkSource?>([
+                source.refresh!(source).timeout(const Duration(seconds: 20)),
+                prepared.then((_) => null),
+              ]);
+            } catch (_) {
+              // Do not expose signed URLs or request exceptions in playback errors.
+            }
+          }
+          if (_disposed || _disposing != null || load != _load) {
+            throw StateError('Source refresh canceled');
+          }
+          if (ready.isCompleted) await prepared;
+          if (next == null ||
+              next.videoTrack?.id != source.videoTrack?.id ||
+              next.audioTrack?.id != source.audioTrack?.id) {
+            throw PlatformException(code: 'resource_unavailable');
+          }
+          source = next;
+          _networkSource = next;
+          load = ++_load;
+        }
+      }
       await prepared.timeout(const Duration(seconds: 25));
+      if (original is NetworkSource && !identical(original, source)) {
+        original.onRefreshed?.call(original, _networkSource!);
+      }
+    } catch (error) {
+      if (isResourceFailure(error) && !_disposed && _disposing == null) {
+        resourceUnavailable = true;
+        state.buffering = false;
+        bufferingController.add(false);
+      }
+      rethrow;
     } finally {
       _preparing = null;
     }
@@ -260,6 +318,7 @@ class OfficialPlayer extends PlatformPlayer {
         }
       case 'resource_error':
         _nativePrepared = false;
+        resourceUnavailable = true;
         _refreshRequest = null;
         _pendingResource = null;
         state.playing = false;
@@ -410,19 +469,7 @@ class OfficialPlayer extends PlatformPlayer {
         'load': load,
         'requestId': request,
         'available': replacement != null,
-        if (replacement != null) ...{
-          'source': _audioOnly && replacement.audioSource != null
-              ? replacement.audioSource
-              : replacement.videoSource,
-          if (!_audioOnly) 'audio': replacement.audioSource,
-          'sourceTrack': _audioOnly && replacement.audioSource != null
-              ? replacement.audioTrack?.forSource(replacement.audioSource)
-              : replacement.videoTrack?.forSource(replacement.videoSource),
-          if (!_audioOnly)
-            'audioTrack': replacement.audioTrack?.forSource(
-              replacement.audioSource,
-            ),
-        },
+        if (replacement != null) ..._sourceArguments(replacement, _audioOnly),
       });
     } catch (_) {
       if (_pendingResource?.$1 == request) _pendingResource = null;

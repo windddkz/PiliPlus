@@ -239,7 +239,10 @@ final class OfficialRuntime {
                         if(startPosition>0)invoke(player,"seekTo",true,startPosition,5000L);
                         if(wantedPlaying)invoke(player,"start");emit("prepared");heartbeat(token);break;
                     case "completed":wantedPlaying=false;emit("completed");break;
-                    case "error":throw new IOException("Native playback failed");
+                    case "error":
+                        int code=(Integer)args[1];
+                        release();
+                        Bundle failure=new Bundle();failure.putString("event","error");failure.putString("error","native_error_"+code);emit(failure);break;
                     case "video_size":
                         width=(Integer)args[1];height=(Integer)args[2];
                         updateDisplaySize();
@@ -311,7 +314,8 @@ final class OfficialRuntime {
                 int videoId=sourceTrack==null?80:sourceTrack.id,audioId=audioTrack==null?30280:audioTrack.id;
                 asset=construct("com.bilibili.ijk.media.MediaAsset$Dash",audioId,videoId,Collections.singletonList(dashStream(video,0,videoId,sourceTrack)),Collections.singletonList(dashStream(sound,1,audioId,audioTrack)),scheme,options,null);
             } else {
-                Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField("NORMAL").get(null);
+                // The original adapter enables HTTP recovery hooks only for VOD assets.
+                Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField(sourceTrack!=null&&!source.startsWith("/")?"VOD":"NORMAL").get(null);
                 asset=construct("com.bilibili.ijk.media.MediaAsset$Normal",source,sourceTrack==null?Collections.emptyList():sourceTrack.backups,scheme,options,null);
             }
             if(!audioOnly&&surface!=null&&!directHdr) {

@@ -307,6 +307,18 @@ class AudioController extends GetxController
     _wantsPlay = true;
     await _commands;
     if (!audioFocusAvailable || !_wantsPlay) return;
+    if (player case final OfficialPlayer current
+        when current.resourceUnavailable && _sourceUrl != null) {
+      _start = current.state.position;
+      await _onOpenMedia(
+        _sourceUrl!,
+        track: _sourceTrack,
+        ua: _sourceUa,
+        referer: _sourceReferer,
+        volume: _sourceVolume,
+      );
+      return;
+    }
     await (audioSessionHandler?.play(this).then((_) {}) ?? playForAudioFocus());
   }
 

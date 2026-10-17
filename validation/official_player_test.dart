@@ -78,6 +78,176 @@ void main() {
     audioOnly: false,
   );
 
+  Future<void> failProbe({
+    String detail = 'open_video_probe_IOException',
+    bool always = false,
+  }) async {
+    var opens = 0;
+    messenger.setMockMethodCallHandler(commands, (call) async {
+      calls.add(call);
+      if (call.method == 'open' && (++opens == 1 || always)) {
+        throw PlatformException(code: 'native_command_failed', details: detail);
+      }
+      return switch (call.method) {
+        'availability' => {'available': true},
+        'create' => {'session': 7},
+        _ => null,
+      };
+    });
+  }
+
+  NetworkSource probeSource({
+    String url = 'old',
+    int id = 80,
+    Future<NetworkSource?> Function(NetworkSource)? refresh,
+    void Function(NetworkSource, NetworkSource)? committed,
+  }) => NetworkSource(
+    videoSource: 'https://example.invalid/$url',
+    audioSource: null,
+    videoTrack: DashTrack(
+      source: 'https://example.invalid/$url',
+      id: id,
+      bandwidth: 99,
+      urls: [],
+    ),
+    refresh: refresh,
+    onRefreshed: committed,
+  );
+
+  test('expired probe refreshes once, retains controls and commits after preparation', () async {
+    await failProbe();
+    final p = await create();
+    var commits = 0;
+    final opening = p.openSource(
+      probeSource(
+        refresh: (_) async => probeSource(url: 'fresh'),
+        committed: (_, next) {
+          commits++;
+          expect(next.videoSource, endsWith('/fresh'));
+        },
+      ),
+      position: const Duration(seconds: 7),
+      userAgent: 'same-UA',
+      referer: 'same-referer',
+      audioOnly: true,
+      loudnessMode: 'normal',
+      loudnessValues: [1, 2, 3],
+      loudnessScenes: {'normal_target_i': '-14'},
+    );
+    await Future<void>.delayed(Duration.zero);
+    final opens = calls.where((c) => c.method == 'open').toList();
+    expect(opens.length, 2);
+    final first = Map<String, dynamic>.from(opens.first.arguments as Map);
+    final second = Map<String, dynamic>.from(opens.last.arguments as Map);
+    expect(second['load'], 2);
+    expect(second['source'], endsWith('/fresh'));
+    for (final key in ['source', 'sourceTrack', 'load']) {
+      first.remove(key);
+      second.remove(key);
+    }
+    expect(second, first);
+    expect(commits, 0);
+    await emit({'event': 'prepared', 'load': 1});
+    expect(commits, 0);
+    await emit({'event': 'prepared', 'load': 2});
+    await emit({
+      'event': 'seek_complete',
+      'load': 2,
+      'position': 7000,
+      'target': 7000,
+      'duration': 60000,
+      'timedOut': false,
+      'accurate': true,
+    });
+    await opening;
+    expect(commits, 1);
+    expect(p.resourceUnavailable, false);
+    await p.dispose();
+  });
+
+  for (final mode in ['missing', 'mismatch', 'repeated', 'exception']) {
+    test(
+      'probe refresh $mode fails without stale-source fallback or endless retry',
+      () async {
+        await failProbe(always: true);
+        final p = await create();
+        var requests = 0;
+        final source = probeSource(
+          refresh: (_) async {
+            requests++;
+            if (mode == 'exception') throw StateError('private URL');
+            return mode == 'missing'
+                ? null
+                : probeSource(url: 'fresh', id: mode == 'mismatch' ? 120 : 80);
+          },
+        );
+        await expectLater(
+          p.openSource(source, userAgent: '', referer: '', audioOnly: false),
+          throwsA(predicate(OfficialPlayer.isResourceFailure)),
+        );
+        expect(requests, 1);
+        expect(
+          calls.where((c) => c.method == 'open').length,
+          mode == 'repeated' ? 2 : 1,
+        );
+        expect(p.resourceUnavailable, true);
+        expect(p.state.buffering, false);
+        await p.dispose();
+      },
+    );
+  }
+
+  test(
+    'dispose interrupts a pending initial source refresh without a late open',
+    () async {
+      await failProbe();
+      final p = await create();
+      final supplier = Completer<NetworkSource?>();
+      final opening = p.openSource(
+        probeSource(refresh: (_) => supplier.future),
+        userAgent: '',
+        referer: '',
+        audioOnly: true,
+      );
+      final stopped = expectLater(opening, throwsStateError);
+      await Future<void>.delayed(Duration.zero);
+      await p.dispose();
+      await stopped;
+      supplier.complete(probeSource(url: 'late'));
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.where((c) => c.method == 'open').length, 1);
+    },
+  );
+
+  test('unsupported format does not invoke network refresh or change failure classification', () async {
+    await failProbe(detail: 'open_video_probe_IllegalArgumentException');
+    final p = await create();
+    var requests = 0;
+    await expectLater(
+      p.openSource(
+        probeSource(
+          refresh: (_) async {
+            requests++;
+            return null;
+          },
+        ),
+        userAgent: '',
+        referer: '',
+        audioOnly: true,
+      ),
+      throwsA(
+        isA<PlatformException>().having(
+          (e) => e.code,
+          'code',
+          'native_command_failed',
+        ),
+      ),
+    );
+    expect(requests, 0);
+    expect(p.resourceUnavailable, false);
+    await p.dispose();
+  });
+
   test('resource refresh commits only after native acceptance and ignores duplicate requests', () async {
     final p = await create();
     final result = Completer<NetworkSource?>();
@@ -263,6 +433,7 @@ void main() {
     expect(p.state.buffering, false);
     expect(p.state.playing, false);
     expect(errors, ['official:resource_unavailable']);
+    expect(p.resourceUnavailable, true);
     expect(
       OfficialPlayer.isResourceFailure(
         PlatformException(code: 'native_process_died'),
@@ -270,6 +441,11 @@ void main() {
       false,
     );
     await subscription.cancel();
+    final retry = open(p);
+    await Future<void>.delayed(Duration.zero);
+    await emit({'event': 'prepared', 'load': 2});
+    await retry;
+    expect(p.resourceUnavailable, false);
     await p.dispose();
   });
 
