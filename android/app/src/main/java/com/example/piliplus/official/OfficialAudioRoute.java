@@ -69,7 +69,7 @@ final class OfficialAudioRoute {
     void describe(Bundle data) {
         data.putInt("dolbyEndpoint", endpoint); data.putString("routeEvidence", evidence);
         data.putIntArray("routeDeviceTypes", types.clone()); data.putLong("routeEpoch", epoch);
-        // No AudioTrack handle is exposed by the original JNI; actual device/timestamp remains unavailable.
+        // Policy prediction is separate from the owned AudioTrack observation added by the runtime.
         data.putBoolean("actualRouteVerified", false);
     }
 }

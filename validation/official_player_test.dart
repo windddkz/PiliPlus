@@ -1992,23 +1992,72 @@ void main() {
       await emit({...nativeState, 'session': 99, 'speed': 2});
       expect(player.state.rate, 3);
       expect(rates, [3]);
-      // A second request must be corrected even if the native rate stayed 3x.
+      // A repeated request must never replace the confirmed 3x with an unconfirmed 4x.
       await player.setRate(4);
       await emit(nativeState);
-      expect(rates, [3, 3]);
+      expect(rates, [3]);
       await emit({...nativeState, 'speed': 1.0});
-      expect(rates, [3, 3, 1]);
+      expect(rates, [3, 1]);
       await player.setRate(1.3);
       await emit({...nativeState, 'speed': 1.2999999523162842});
-      expect(player.state.rate, 1.2999999523162842);
-      expect(rates, [3, 3, 1]);
+      expect(player.state.rate, 1.3);
+      expect(rates, [3, 1, 1.3]);
       await emit({...nativeState, 'speed': 2.0});
-      expect(rates, [3, 3, 1, 2]);
+      expect(rates, [3, 1, 1.3, 2]);
       await player.dispose();
       await closed.future;
       await subscription.cancel();
     },
   );
+
+  test('actual output and speed are distinct from policy and requests', () async {
+    final player = await create();
+    final opening = open(player);
+    await Future<void>.delayed(Duration.zero);
+    await emit({'event': 'prepared'});
+    await opening;
+    const state = <String, Object?>{
+      'event': 'state',
+      'position': 1000,
+      'duration': 30000,
+      'playing': true,
+      'speed': 1.0,
+      'width': 640,
+      'height': 360,
+      'bufferedPercent': 50,
+      'dolbyEndpoint': 2,
+    };
+    await player.setRate(2);
+    await emit({...state, 'speedPending': true});
+    expect(player.requestedRate, 2);
+    expect(player.state.rate, 1);
+    expect(player.speedPending, true);
+    expect(player.outputDescription, contains('尚未取得实际路由'));
+    // Releasing a long press must submit 1x even before 2x reaches the output.
+    await player.setRate(1);
+    expect((calls.last.arguments as Map)['speed'], 1);
+    await emit({
+      ...state,
+      'speedVerified': true,
+      'speedError': -22,
+      'actualRouteVerified': true,
+      'actualRouteType': 2,
+      'outputSampleRate': 48000,
+      'outputChannels': 2,
+      'outputEncoding': 2,
+    });
+    expect(player.speedDescription, contains('引擎生效'));
+    expect(player.speedDescription, contains('拒绝'));
+    expect(
+      player.outputDescription,
+      contains('扬声器 / 48000 Hz / 2 声道 / PCM 16位'),
+    );
+    await emit(state);
+    expect(player.actualRouteVerified, false);
+    expect(player.outputSampleRate, null);
+    expect(player.speedVerified, false);
+    await player.dispose();
+  });
 
   test(
     'rate request bounds and command failures retain valid state',
@@ -2018,7 +2067,8 @@ void main() {
         expect(OfficialPlayer.supportsRate(rate), true);
         await player.setRate(rate);
         expect((calls.last.arguments as Map)['speed'], rate);
-        expect(player.state.rate, rate);
+        expect(player.requestedRate, rate);
+        expect(player.state.rate, 1);
       }
       final before = calls.length;
       for (final rate in [
@@ -2034,7 +2084,8 @@ void main() {
         await expectLater(player.setRate(rate), throwsArgumentError);
       }
       expect(calls.length, before);
-      expect(player.state.rate, 4.0);
+      expect(player.requestedRate, 4.0);
+      expect(player.state.rate, 1);
       messenger.setMockMethodCallHandler(commands, (call) async {
         if (call.method == 'speed') {
           throw PlatformException(code: 'speed_failed');
@@ -2042,7 +2093,8 @@ void main() {
         return null;
       });
       await expectLater(player.setRate(1.0), throwsA(isA<PlatformException>()));
-      expect(player.state.rate, 4.0);
+      expect(player.requestedRate, 4.0);
+      expect(player.state.rate, 1);
       await player.dispose();
     },
   );

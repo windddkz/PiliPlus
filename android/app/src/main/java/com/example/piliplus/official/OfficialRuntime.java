@@ -1048,6 +1048,24 @@ final class OfficialRuntime {
         applyEndpoint(endpoint);
     }
     private void describeRoute(String event) {Bundle data=new Bundle();data.putString("event",event);route.describe(data);emit(data);}
+    private void describeActualOutput(Bundle data) {
+        try {
+            Object handle=bridge("getAudioTrack");
+            if(!(handle instanceof android.media.AudioTrack))return;
+            android.media.AudioTrack track=(android.media.AudioTrack)handle;
+            if(track.getState()!=android.media.AudioTrack.STATE_INITIALIZED)return;
+            data.putInt("audioSession",track.getAudioSessionId());
+            data.putInt("outputSampleRate",track.getSampleRate());
+            data.putInt("outputChannels",track.getChannelCount());
+            data.putInt("outputEncoding",track.getAudioFormat());
+            android.media.AudioDeviceInfo device=track.getRoutedDevice();
+            if(device!=null) {
+                data.putBoolean("actualRouteVerified",true);
+                data.putInt("actualRouteType",device.getType());data.putInt("actualRouteId",device.getId());
+            }
+        } catch(Exception unavailable) { /* Output inspection must not interrupt playback. */ }
+    }
+
     private void heartbeat(long token) {
         worker.postDelayed(()->run(token,()->{
             route.refresh();if(token!=generation)return;
@@ -1055,8 +1073,16 @@ final class OfficialRuntime {
             if(graph.getInt("errors")!=0||graph.getInt("filter_error")!=0)throw new IOException("Audio adaptation failed");
             Bundle b=new Bundle();b.putString("event","state");route.describe(b);
             b.putLong("position",(Long)invoke(player,"getCurrentPosition"));b.putLong("duration",(Long)invoke(player,"getDuration"));
-            float nativeSpeed=(Float)invoke(player,"getSpeed");
-            b.putBoolean("playing",(Boolean)invoke(player,"isPlaying"));b.putFloat("speed",speed==2f&&nativeSpeed==1.99f?2f:nativeSpeed);b.putFloat("volume",volume);
+            float coreSpeed=(Float)invoke(player,"getSpeed");
+            JSONObject output=new JSONObject((String)bridge("getOutputState"));
+            double engineSpeed=output.getDouble("rate");
+            boolean verified=Double.isFinite(engineSpeed)&&engineSpeed>0;
+            double nativeSpeed=verified?engineSpeed:coreSpeed;
+            b.putBoolean("playing",(Boolean)invoke(player,"isPlaying"));
+            b.putDouble("speed",speed==2f&&Math.abs(nativeSpeed-1.99)<.00001?2:nativeSpeed);
+            b.putBoolean("speedVerified",verified);b.putBoolean("speedPending",output.getBoolean("pending"));
+            b.putInt("speedError",output.getInt("error"));b.putFloat("volume",volume);
+            describeActualOutput(b);
             b.putInt("width",displayWidth);b.putInt("height",displayHeight);
             b.putInt("videoQuality",actualVideoQuality);b.putBoolean("automaticVideo",automaticVideoActive);
             Object monitor=invoke(player,"getPlayerMonitor");long buffered=(Long)invoke(monitor,"getPacketQueueCacheDurationMs",1);

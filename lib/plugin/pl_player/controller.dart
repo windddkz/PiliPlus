@@ -209,7 +209,7 @@ class PlPlayerController
       _videoPlayerController is OfficialPlayer && !onlyPlayAudio.value;
 
   String get backendDescription => _videoPlayerController is OfficialPlayer
-      ? '官方国内版 9.14.0 / IJK 音视频内核（实验）\n${(_videoPlayerController! as OfficialPlayer).audioDescription}\n${(_videoPlayerController! as OfficialPlayer).routeDescription}\n${(_videoPlayerController! as OfficialPlayer).loudnessDescription}'
+      ? '官方国内版 9.14.0 / IJK 音视频内核（实验）\n${(_videoPlayerController! as OfficialPlayer).audioDescription}\n${(_videoPlayerController! as OfficialPlayer).routeDescription}\n${(_videoPlayerController! as OfficialPlayer).outputDescription}\n${(_videoPlayerController! as OfficialPlayer).speedDescription}\n${(_videoPlayerController! as OfficialPlayer).loudnessDescription}'
       : _officialFallbackReason == null
       ? 'mpv'
       : 'mpv（回退：$_officialFallbackReason）';
@@ -1692,13 +1692,16 @@ class PlPlayerController
       return false;
     }
     try {
-      if (speed != player.state.rate) await player.setRate(speed);
+      final requested = player is OfficialPlayer
+          ? player.requestedRate
+          : player.state.rate;
+      if (speed != requested) await player.setRate(speed);
     } catch (_) {
       SmartDialog.showToast('切换倍速失败，已保留当前倍速');
       return false;
     }
     if (!identical(player, _videoPlayerController)) return false;
-    _updatePlaybackSpeed(speed);
+    _updatePlaybackSpeed(player is OfficialPlayer ? player.state.rate : speed);
     return true;
   }
 

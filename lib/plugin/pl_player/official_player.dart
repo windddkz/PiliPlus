@@ -116,6 +116,38 @@ class OfficialPlayer extends PlatformPlayer {
     subtitleController.add(next);
   }
 
+  double requestedRate = 1;
+  bool speedVerified = false;
+  bool speedPending = false;
+  int speedError = 0;
+  bool actualRouteVerified = false;
+  int? actualRouteType, outputSampleRate, outputChannels, outputEncoding;
+  String get speedDescription =>
+      '倍速：请求 $requestedRate，${speedVerified ? "引擎生效" : "播放器报告"} ${state.rate}'
+      '${speedPending ? "（切换中）" : ""}${speedError != 0 ? "（音频引擎拒绝本次切换）" : ""}';
+  String get outputDescription {
+    final device = actualRouteVerified
+        ? switch (actualRouteType) {
+            1 => '听筒',
+            2 => '扬声器',
+            3 || 4 => '有线耳机',
+            7 || 8 || 26 || 27 || 30 => '蓝牙',
+            11 || 12 || 22 => 'USB',
+            _ => '设备类型 $actualRouteType',
+          }
+        : '尚未取得实际路由';
+    final format = switch (outputEncoding) {
+      2 => 'PCM 16位',
+      4 => 'PCM float',
+      21 => 'PCM 24位',
+      22 => 'PCM 32位',
+      null => null,
+      _ => '格式 $outputEncoding',
+    };
+    return '实际输出：$device'
+        '${outputSampleRate == null ? "" : " / $outputSampleRate Hz / $outputChannels 声道 / $format"}';
+  }
+
   int? audioSession;
   int? dolbyEndpoint;
   String routeEvidence = 'unavailable';
@@ -431,7 +463,7 @@ class OfficialPlayer extends PlatformPlayer {
             'flipY': flipY,
             ..._sourceArguments(source, audioOnly),
             'position': position?.inMilliseconds ?? 0,
-            'speed': state.rate,
+            'speed': requestedRate,
             'volume': _outputVolume(state.volume),
             'loudnessMode': loudnessMode,
             'loudnessValues': loudnessValues,
@@ -641,7 +673,10 @@ class OfficialPlayer extends PlatformPlayer {
         final playing = event['playing'] == true;
         final playingChanged = state.playing != playing;
         state.playing = playing;
-        final rate = (event['speed'] as num).toDouble();
+        final reportedRate = (event['speed'] as num).toDouble();
+        final rate = (reportedRate - requestedRate).abs() < 1e-6
+            ? requestedRate
+            : reportedRate;
         // Native uses float32; round-trip noise must not turn 1.3x into a long decimal in the UI.
         final rateChanged = (rate - state.rate).abs() > 1e-6;
         state.rate = rate;
@@ -664,6 +699,14 @@ class OfficialPlayer extends PlatformPlayer {
         loudnessState = event['loudnessState'] as String? ?? 'disabled';
         requestedAudioFilter = event['requestedAudioFilter'] as String? ?? '';
         audioSession = event['audioSession'] as int?;
+        speedVerified = event['speedVerified'] == true;
+        speedPending = event['speedPending'] == true;
+        speedError = (event['speedError'] as num?)?.toInt() ?? 0;
+        actualRouteVerified = event['actualRouteVerified'] == true;
+        actualRouteType = (event['actualRouteType'] as num?)?.toInt();
+        outputSampleRate = (event['outputSampleRate'] as num?)?.toInt();
+        outputChannels = (event['outputChannels'] as num?)?.toInt();
+        outputEncoding = (event['outputEncoding'] as num?)?.toInt();
         dolbyEndpoint = (event['dolbyEndpoint'] as num?)?.toInt();
         dolbyControlsApplicable = event['dolbyControlsApplicable'] == true;
         routeEvidence = event['routeEvidence'] as String? ?? 'unavailable';
@@ -936,8 +979,11 @@ class OfficialPlayer extends PlatformPlayer {
     if (!supportsRate(rate)) {
       throw ArgumentError.value(rate, 'rate');
     }
+    final load = _load;
     await _send('speed', {'speed': rate});
-    state.rate = rate;
+    if (!_disposed && _disposing == null && load == _load) {
+      requestedRate = rate;
+    }
   }
 
   @override

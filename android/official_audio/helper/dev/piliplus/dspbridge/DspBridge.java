@@ -16,6 +16,8 @@ public final class DspBridge {
     public static native void interruptPreload(long nativeItem);
     public static native void startGraphAdapter(boolean loudnessEnabled, double gainDb, boolean diagnostics, boolean prefill, boolean videoDiagnostics);
     public static native String getGraphState();
+    public static native Object getAudioTrack();
+    public static native String getOutputState();
     public static native int finishVideoTrace(String path);
     public static native String finishGraphAdapter();
     public static native void startDspRoute(int endpoint, int virtualizer, boolean hardwareDolby);

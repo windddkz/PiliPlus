@@ -68,6 +68,7 @@ static uint64_t filter_total_ns,filter_max_ns,filter_over_40ms;
 static uint64_t monotonic_ns(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000000u+(uint64_t)t.tv_nsec;}
 #include "slot_pair.h"
 #include "clock_adapter.h"
+#include "output_observer.h"
 static int last_rate,last_channels;
 static int (*receive_original)(void *,AVFrame *);
 static void (*flush_original)(void *);
@@ -234,7 +235,7 @@ static int replace_stretcher(int install){
 }
 #include "video_trace.h"
 #include "audio_buffer.h"
-static int (*const changes[])(int)={replace_source,replace_decoder,replace_clock_timestamp,replace_video_trace,replace_stretcher,replace_reset_flush,replace_timeline_flush,replace_timeline_reset,replace_clock_resume,replace_audio_buffer};
+static int (*const changes[])(int)={replace_source,replace_decoder,replace_clock_timestamp,replace_video_trace,replace_stretcher,replace_reset_flush,replace_timeline_flush,replace_timeline_reset,replace_clock_resume,replace_audio_buffer,replace_output_track,replace_output_engine};
 static int installed;
 static void restore(JNIEnv *env){
     while(installed){
@@ -244,6 +245,7 @@ static void restore(JNIEnv *env){
     }
 }
 JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_startGraphAdapter(JNIEnv *env,jclass cls,jboolean loudness_enabled,jdouble gain_db,jboolean diagnostics,jboolean prefill,jboolean video_diagnostics){
+    (*env)->GetJavaVM(env,&output_vm);
     (void)cls;
     if(active||installed){fail(env,"Graph adapter already active");return;}
     if(!isfinite(gain_db)||gain_db < -99||gain_db > 10){fail(env,"Invalid metadata gain");return;}
