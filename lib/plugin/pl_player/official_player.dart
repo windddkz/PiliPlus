@@ -222,6 +222,13 @@ class OfficialPlayer extends PlatformPlayer {
         final error = event['timedOut'] == true
             ? PlatformException(code: 'official_seek_timeout')
             : null;
+        if (error == null &&
+            duration > 0 &&
+            position < duration &&
+            state.completed) {
+          state.completed = false;
+          completedController.add(false);
+        }
         if (initial) {
           _initialSeekTarget = null;
           if (error != null) {

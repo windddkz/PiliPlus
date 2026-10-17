@@ -131,6 +131,42 @@ void main() {
     expect(p.state.position.inMilliseconds, 5000);
     await p.dispose();
   });
+  test('confirmed seek before EOF clears completed state and stream', () async {
+    final p = await prepared();
+    final completed = <bool>[];
+    final sub = p.stream.completed.listen(completed.add);
+    await emit({'event': 'completed'});
+    final pending = p.seek(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+    expect(p.state.completed, true);
+    await result(0, 0, duration: 30000);
+    await pending;
+    expect(p.state.completed, false);
+    expect(completed, [true, false]);
+    expect(p.state.playing, false);
+    await sub.cancel();
+    await p.dispose();
+  });
+  test('unrelated, timed out and EOF seeks do not clear completion', () async {
+    final p = await prepared();
+    await emit({'event': 'completed'});
+    final failed = expectLater(
+      p.seek(Duration.zero),
+      throwsA(isA<PlatformException>()),
+    );
+    await Future<void>.delayed(Duration.zero);
+    await result(1000, 1000, duration: 30000);
+    expect(p.state.completed, true);
+    await result(0, 0, duration: 30000, timeout: true);
+    await failed;
+    expect(p.state.completed, true);
+    final end = p.seek(const Duration(seconds: 35));
+    await Future<void>.delayed(Duration.zero);
+    await result(30000, 30000, duration: 30000);
+    await end;
+    expect(p.state.completed, true);
+    await p.dispose();
+  });
   test('duration cannot make an unrelated in-range target match', () async {
     final p = await prepared();
     bool done = false;

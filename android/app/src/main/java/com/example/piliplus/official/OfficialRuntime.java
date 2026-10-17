@@ -21,12 +21,13 @@ final class OfficialRuntime {
     private final Handler worker;
     private final Events events;
     private DexClassLoader loader;
-    private Object player, item;
+    private Object player, item, externalRenderer;
     private OfficialAudioRoute route;
     private Surface outputSurface;
     private Bundle openRequest;
     private long generation, load;
-    private boolean initAttempted, prepared, wantedPlaying, graphActive, dspActive;
+    private boolean initAttempted, prepared, graphActive, dspActive;
+    private volatile boolean wantedPlaying;
     private float speed = 1, volume = 1;
     private long startPosition;
     private int width, height, displayWidth, displayHeight, appliedEndpoint;
@@ -222,6 +223,7 @@ final class OfficialRuntime {
                     case "video_size":
                         width=(Integer)args[1];height=(Integer)args[2];
                         updateDisplaySize();
+                        if(externalRenderer!=null&&displayWidth>0&&displayHeight>0)invoke(externalRenderer,"setVideoSize",displayWidth,displayHeight);
                         if(width>0&&height>0&&outputSurface!=null)invoke(player,"setSurfaceSize",width,height);break;
                     case "seek_complete":
                         Bundle seek=new Bundle();seek.putString("event","seek_complete");
@@ -270,7 +272,28 @@ final class OfficialRuntime {
                 invoke(player,(String)binding[0],callback((Integer)binding[1],(String)binding[2],token));
             boolean audioOnly=request.getBoolean("audioOnly",false);
             invoke(player,"setAudioOnly",audioOnly);invoke(player,"setVolume",volume);invoke(player,"setSpeed",speed);
-            if(!audioOnly&&surface!=null)invoke(player,"setSurface",surface);
+            if(!audioOnly&&surface!=null) {
+                invoke(cls("tv.danmaku.ijk.media.player.render.core.BiliRenderContext"),"init",context);
+                cls("tv.danmaku.ijk.media.player.render.IjkExternalRenderThread").getField("EXTERNAL_RENDER_TYPE").setInt(null,0);
+                externalRenderer=construct("tv.danmaku.ijk.media.player.render.IjkExternalRenderThread");
+                Object render=construct("tv.danmaku.ijk.media.player.render.output.IJKPlayerExternalRender");
+                invoke(externalRenderer,"setRenderCallback",render);
+                Object pauseCallback=Proxy.newProxyInstance(loader,new Class<?>[]{cls("tv.danmaku.ijk.media.player.render.IjkExternalRenderThread$GetPlayerPauseStateCallback")},(proxy,method,args)->{
+                    switch(method.getName()) {
+                        case "toString":return "PiliPlusPlayerPauseState";
+                        case "hashCode":return System.identityHashCode(proxy);
+                        case "equals":return proxy==args[0];
+                        case "isPlayerPause":return !wantedPlaying;
+                        default:throw new UnsupportedOperationException(method.getName());
+                    }
+                });
+                invoke(externalRenderer,"setPlayerPauseStateCallback",pauseCallback);
+                invoke(externalRenderer,"setAspectRatio",1,1);
+                if(!Boolean.TRUE.equals(invoke(externalRenderer,"createWindowSurface",surface)))throw new IOException("Official output window failed");
+                Surface decoderSurface=(Surface)invoke(externalRenderer,"getAmcSurface");
+                if(decoderSurface==null||!decoderSurface.isValid())throw new IOException("Official input surface invalid");
+                invoke(player,"setSurface",decoderSurface);
+            }
             Map<String,String> options=new HashMap<>();options.put("user_agent",userAgent);options.put("referer",referer);
             Object asset;
             if(audio!=null&&!audio.isEmpty()) {
@@ -331,7 +354,11 @@ final class OfficialRuntime {
         }),250);
     }
     void surface(Surface surface) throws Exception {
-        outputSurface=surface;if(player!=null){invoke(player,"setSurface",surface);if(surface!=null&&width>0&&height>0)invoke(player,"setSurfaceSize",width,height);}
+        outputSurface=surface;
+        if(externalRenderer!=null) {
+            if(surface==null)invoke(externalRenderer,"releaseWindowSurface");
+            else if(!Boolean.TRUE.equals(invoke(externalRenderer,"createWindowSurface",surface)))throw new IOException("Official output replacement failed");
+        } else if(player!=null){invoke(player,"setSurface",surface);if(surface!=null&&width>0&&height>0)invoke(player,"setSurfaceSize",width,height);}
     }
     void play(boolean value) throws Exception {wantedPlaying=value;if(prepared)invoke(player,value?"start":"pause");}
     void seek(long position) throws Exception {
@@ -351,6 +378,7 @@ final class OfficialRuntime {
         if(route!=null){route.stop();route=null;}
         if(player!=null){invoke(player,"release");player=null;}
         if(item!=null){invoke(item,"release");item=null;}
+        if(externalRenderer!=null){invoke(externalRenderer,"quitExternalRender");externalRenderer=null;}
         if(graphActive){JSONObject result=new JSONObject((String)bridge("finishGraphAdapter"));graphActive=false;
             if(com.example.piliplus.BuildConfig.DEBUG && result.optBoolean("video_trace_enabled")) {
                 int rows=(Integer)bridge("finishVideoTrace",new File(context.getFilesDir(),"official-video-trace.tsv").getPath());
