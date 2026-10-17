@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name=".official.OfficialPluginTestActivity"
+            android:exported="true" android:label="Official bridge callback test" />
+        <activity android:name=".official.OfficialPlaybackTestActivity"
+            android:exported="true" android:label="Official playback integration test" />
+    </application>
+</manifest>
