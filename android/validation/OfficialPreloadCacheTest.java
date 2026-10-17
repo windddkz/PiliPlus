@@ -198,6 +198,31 @@ public final class OfficialPreloadCacheTest {
             c.event(removal,old,"REMOVED",0);check(consumed.isEmpty());
             c.event(detach,task,"DETACHED",0);check(consumed.equals(List.of("new")) && c.size()==0);
         }
-        System.out.println("20 ownership scenarios passed");
+        {
+            Fake f=new Fake();OfficialPreloadCache<String> c=f.cache();List<String> consumed=new ArrayList<>();
+            c.add("a","same-item");long old=f.task;
+            check(c.take("a",consumed::add));long detached=f.request;
+            c.event(detached,old,"DETACHED",0);check(consumed.equals(List.of("same-item")) && c.size()==0);
+            consumed.clear();check(c.add("a","same-item"));long retry=f.task;
+            check(c.takeReady("a",consumed::add));int calls=f.calls.size();
+            c.event(0,old,"READY",0);c.event(detached,old,"DETACHED",0);
+            check(f.calls.size()==calls && consumed.isEmpty() && c.size()==1);
+            c.event(0,retry,"READY",0);c.event(f.request,retry,"DETACHED",0);
+            check(consumed.equals(List.of("same-item")) && c.size()==0);
+            check(!f.calls.contains("release:same-item"));
+            for(Runnable timer:f.timers)timer.run();check(!c.isBroken());
+        }
+        {
+            Fake f=new Fake();OfficialPreloadCache<String> c=f.cache();List<String> consumed=new ArrayList<>();
+            c.add("a","same-item");long old=f.task;check(c.take("a",consumed::add));
+            c.event(f.request,old,"DETACHED",0);consumed.clear();
+            check(c.add("a","same-item"));long retry=f.task;check(c.takeReady("a",consumed::add));
+            c.discardExcept(null);long removal=f.request;
+            c.event(0,old,"READY",0);c.event(0,retry,"READY",0);check(consumed.isEmpty());
+            c.event(removal,retry,"REMOVED",0);check(c.size()==0);
+            check(f.calls.stream().filter("release:same-item"::equals).count()==1);
+            for(Runnable timer:f.timers)timer.run();check(!c.isBroken());
+        }
+        System.out.println("22 ownership scenarios passed");
     }
 }

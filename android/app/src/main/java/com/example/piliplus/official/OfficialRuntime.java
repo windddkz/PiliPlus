@@ -609,6 +609,14 @@ final class OfficialRuntime {
                 Object handle=invoke(item,"nativePtrOrNull$srcs_base_ijk_ijk_library_android");
                 if(!(handle instanceof Long))throw new IOException("Missing prepared media handle");
                 int kind=(Integer)bridge("classifyHdr",handle);
+                if(kind==-1 && media.preloadTarget>1) {
+                    // A not-yet-opened preload may detach before it has metadata; prepare the same item once.
+                    String key=preloadKey(request);if(key==null)key="foreground-"+token;
+                    media.preloadTarget=1;item=null;
+                    if(!preloads.add(key,media) || !preloads.takeReady(key,ready->consumePreload(ready,token,request)))
+                        throw new IOException("Native metadata preparation unavailable");
+                    stage("prepare_metadata");return;
+                }
                 if(kind<0 || kind>3)throw new IOException("Unknown prepared HDR metadata");
                 configureOutput(kind!=0);awaitingMediaInfo=false;
                 if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.d("PiliMedia","detached HDR type="+kind);
@@ -630,7 +638,10 @@ final class OfficialRuntime {
             media.item=nativeItem(media.asset,0);media.preloadTarget=1;
             if(!preloads.add(key,media))throw new IOException("Native metadata preload rejected");
         }
-        if(!preloads.takeReady(key,ready->consumePreload(ready,token,request)))throw new IOException("Native metadata handoff unavailable");
+        // Like the official Acquire path, take an existing task without waiting for its buffer target.
+        boolean taken=cached?preloads.take(key,ready->consumePreload(ready,token,request)):
+            preloads.takeReady(key,ready->consumePreload(ready,token,request));
+        if(!taken)throw new IOException("Native metadata handoff unavailable");
     }
     private void configureOutput(boolean hdr) throws Exception {
         Bundle request=openRequest;Surface surface=outputSurface;
