@@ -300,6 +300,73 @@ void main() {
     expect(await cache.take(account, key), isNull);
   });
 
+  for (final cold in [true, false]) {
+    test(
+      'clicked snapshot survives capacity before progress arrives (cold: $cold)',
+      () async {
+        final model = fixture(position: 12000);
+        if (cold) {
+          cache.remember(account, key, model);
+        } else {
+          await cache.preload(account, key, () async => Success(model));
+          expect(await cache.take(account, key), isNotNull);
+        }
+        for (var i = 0; i < PlayUrlPrefetch.capacity + 5; i++) {
+          await cache.preload(
+            account,
+            (bvid: 'BV-$i', cid: i + 2, tryLook: false, voiceBalance: true),
+            () async => Success(fixture()),
+          );
+        }
+        expect((await cache.retain(account, key))?.lastPlayTime, 12000);
+        expect(
+          (await cache.retain(account, key))?.officialPreloadToken,
+          model.officialPreloadToken,
+        );
+      },
+    );
+  }
+
+  test('new recommendations preserve watched positions and recently retained candidates', () async {
+    final played = fixture();
+    cache
+      ..remember(account, key, played)
+      ..recordPosition(account, played.officialPreloadToken!, 30000);
+    PlayUrlKey candidate(int i) =>
+        (bvid: 'BV-$i', cid: i + 2, tryLook: false, voiceBalance: true);
+    for (var i = 0; i < PlayUrlPrefetch.capacity - 1; i++) {
+      await cache.preload(
+        account,
+        candidate(i),
+        () async => Success(fixture()),
+      );
+    }
+    final visible = (await cache.retain(account, candidate(0)))!;
+    for (
+      var i = PlayUrlPrefetch.capacity;
+      i < PlayUrlPrefetch.capacity + 5;
+      i++
+    ) {
+      await cache.preload(
+        account,
+        candidate(i),
+        () async => Success(fixture()),
+      );
+    }
+    expect((await cache.take(account, key))?.lastPlayTime, 30000);
+    expect(
+      (await cache.take(account, key))?.officialPreloadToken,
+      played.officialPreloadToken,
+    );
+    expect(
+      (await cache.retain(account, candidate(0)))?.officialPreloadToken,
+      visible.officialPreloadToken,
+    );
+    expect(await cache.retain(account, candidate(1)), isNull);
+    now = now.add(PlayUrlPrefetch.lifetime);
+    expect(await cache.take(account, key), isNull);
+  });
+
   test(
     'completion resets resume position while retaining media identity',
     () async {
@@ -353,8 +420,9 @@ void main() {
       cache.recordPosition(account, 'another-video', 42);
       expect((await cache.retain(account, key))!.lastPlayTime, 12345);
       final nextAccount = Object();
-      cache.remember(nextAccount, key, fixture(position: 400));
-      cache.recordPosition(nextAccount, token, 99999);
+      cache
+        ..remember(nextAccount, key, fixture(position: 400))
+        ..recordPosition(nextAccount, token, 99999);
       expect((await cache.take(nextAccount, key))!.lastPlayTime, 400);
       expect(changes, 2);
     },

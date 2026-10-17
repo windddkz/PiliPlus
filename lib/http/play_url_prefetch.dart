@@ -42,6 +42,7 @@ class PlayUrlPrefetch {
     _makeRoom();
     _entries[key] = _Entry(_now(), Future.value(snapshot))
       ..done = true
+      ..position = snapshot.lastPlayTime
       ..token = snapshot.officialPreloadToken;
   }
 
@@ -65,7 +66,10 @@ class PlayUrlPrefetch {
 
   void _makeRoom() {
     if (_entries.length < capacity) return;
-    final oldest = _entries.keys.firstWhere((key) => _entries[key]!.done);
+    final oldest = _entries.keys.firstWhere(
+      (key) => _entries[key]!.done && _entries[key]!.position == null,
+      orElse: () => _entries.keys.firstWhere((key) => _entries[key]!.done),
+    );
     _entries.remove(oldest);
   }
 
@@ -123,6 +127,7 @@ class PlayUrlPrefetch {
     if (!_usable(result)) return null;
     _entries.remove(key);
     _entries[key] = entry;
+    entry.position ??= result.lastPlayTime;
     return result.copyForPlayback()
       ?..lastPlayTime = entry.position ?? result.lastPlayTime;
   }
@@ -139,6 +144,8 @@ class PlayUrlPrefetch {
       _entries.remove(key);
       return null;
     }
+    _entries.remove(key);
+    _entries[key] = entry;
     return result.copyForPlayback()
       ?..lastPlayTime = entry.position ?? result.lastPlayTime;
   }
