@@ -12,6 +12,15 @@ class DashSelection {
   final AudioItem? audio;
   final VideoDecodeFormatType codec;
 
+  static bool supportsAutomatic(List<DashTrack> ladder) =>
+      ladder.length > 1 &&
+      ladder.every(
+        (track) =>
+            track.bandwidth != null &&
+            track.bandwidth! > 0 &&
+            track.bandwidth! <= 0x7fffffff,
+      );
+
   static int _colorFamily(int quality) =>
       const {125, 126, 129}.contains(quality) ? quality : 0;
 

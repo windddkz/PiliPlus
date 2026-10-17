@@ -216,4 +216,24 @@ void main() {
       expect(DashSelection.refreshVideoLadder(resource, const []), isEmpty);
     },
   );
+  test('automatic eligibility uses a multi-quality ladder with representable positive rates', () {
+    for (final video in resource.dash!.video!) {
+      video.bandWidth = 1000;
+    }
+    final selected = track(resource.dash!.video![1]);
+    final ladder = DashSelection.videoLadder(resource, selected);
+    expect(DashSelection.supportsAutomatic(ladder), true);
+    expect(ladder.first, same(selected));
+    expect(DashSelection.supportsAutomatic([selected]), false);
+    expect(DashSelection.supportsAutomatic(const []), false);
+    for (final rate in [null, 0, -1, 0x80000000]) {
+      resource.dash!.video!.last.bandWidth = rate;
+      expect(
+        DashSelection.supportsAutomatic(
+          DashSelection.videoLadder(resource, selected),
+        ),
+        false,
+      );
+    }
+  });
 }

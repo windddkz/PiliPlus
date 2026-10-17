@@ -53,7 +53,6 @@ import 'package:PiliPlus/plugin/pl_player/widgets/mpv_convert_webp.dart';
 import 'package:PiliPlus/plugin/pl_player/widgets/play_pause_btn.dart';
 import 'package:PiliPlus/utils/android/bindings.g.dart';
 import 'package:PiliPlus/utils/cache_manager.dart';
-import 'package:PiliPlus/utils/connectivity_utils.dart';
 import 'package:PiliPlus/utils/duration_utils.dart';
 import 'package:PiliPlus/utils/extension/num_ext.dart';
 import 'package:PiliPlus/utils/extension/theme_ext.dart';
@@ -64,8 +63,6 @@ import 'package:PiliPlus/utils/ios/pip_helper.dart';
 import 'package:PiliPlus/utils/mobile_observer.dart';
 import 'package:PiliPlus/utils/path_utils.dart';
 import 'package:PiliPlus/utils/platform_utils.dart';
-import 'package:PiliPlus/utils/storage.dart';
-import 'package:PiliPlus/utils/storage_key.dart';
 import 'package:PiliPlus/utils/utils.dart';
 import 'package:canvas_danmaku/canvas_danmaku.dart';
 import 'package:collection/collection.dart';
@@ -807,62 +804,61 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
           }
           final videoFormat = videoInfo.supportFormats!;
           final availableQa = videoInfo.dash!.video!.availableVideoQualities;
+          final automatic = videoDetailController.isAutomaticVideo;
+          final canAuto = videoDetailController.canSelectAutomaticVideo;
           return PopupMenuButton<int>(
             tooltip: '画质',
             requestFocus: false,
-            initialValue: currentVideoQa.code,
+            initialValue: automatic ? 0 : currentVideoQa.code,
+            enabled: !videoDetailController.qualityChanging.value,
             color: Colors.black.withValues(alpha: 0.8),
             itemBuilder: (context) {
-              return List.generate(
-                videoFormat.length,
-                (index) {
-                  final item = videoFormat[index];
-                  final enabled = availableQa.contains(item.quality);
-                  return PopupMenuItem<int>(
-                    enabled: enabled,
-                    height: 35,
-                    padding: const EdgeInsets.only(left: 15, right: 10),
-                    value: item.quality,
-                    onTap: () async {
-                      if (currentVideoQa.code == item.quality) {
-                        return;
-                      }
-                      final int quality = item.quality!;
-                      final newQa = VideoQuality.fromCode(quality);
-                      videoDetailController
-                        ..plPlayerController.cacheVideoQa = newQa.code
-                        ..currentVideoQa.value = newQa
-                        ..updatePlayer();
-
-                      SmartDialog.showToast("画质已变为：${newQa.desc}");
-
-                      // update
-                      if (!plPlayerController.tempPlayerConf) {
-                        GStorage.setting.put(
-                          await ConnectivityUtils.isWiFi
-                              ? SettingBoxKey.defaultVideoQa
-                              : SettingBoxKey.defaultVideoQaCellular,
-                          quality,
-                        );
-                      }
-                    },
-                    child: Text(
-                      item.newDesc ?? '',
-                      style: enabled
-                          ? const TextStyle(color: Colors.white, fontSize: 13)
-                          : const TextStyle(
-                              color: Color(0x62FFFFFF),
-                              fontSize: 13,
-                            ),
+              return [
+                if (canAuto)
+                  PopupMenuItem<int>(
+                    value: 0,
+                    onTap: () => videoDetailController.selectVideoQuality(null),
+                    child: const Text(
+                      '自动画质',
+                      style: TextStyle(color: Colors.white, fontSize: 13),
                     ),
-                  );
-                },
-              );
+                  ),
+                ...List.generate(
+                  videoFormat.length,
+                  (index) {
+                    final item = videoFormat[index];
+                    final enabled = availableQa.contains(item.quality);
+                    return PopupMenuItem<int>(
+                      enabled: enabled,
+                      height: 35,
+                      padding: const EdgeInsets.only(left: 15, right: 10),
+                      value: item.quality,
+                      onTap: () {
+                        if (!automatic && currentVideoQa.code == item.quality) {
+                          return;
+                        }
+                        videoDetailController.selectVideoQuality(item.quality!);
+                      },
+                      child: Text(
+                        item.newDesc ?? '',
+                        style: enabled
+                            ? const TextStyle(color: Colors.white, fontSize: 13)
+                            : const TextStyle(
+                                color: Color(0x62FFFFFF),
+                                fontSize: 13,
+                              ),
+                      ),
+                    );
+                  },
+                ),
+              ];
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Text(
-                currentVideoQa.shortDesc,
+                videoDetailController.qualityChanging.value
+                    ? '切换中'
+                    : videoDetailController.videoQualityLabel(short: true),
                 style: const TextStyle(color: Colors.white, fontSize: 13),
               ),
             ),

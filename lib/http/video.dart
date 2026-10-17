@@ -136,12 +136,15 @@ abstract final class VideoHttp {
         codecs: selected.video.codecs,
         urls: selected.video.playUrls,
       );
+      final ladder = DashSelection.videoLadder(response, videoTrack);
       final source = NetworkSource(
         videoSource: videoUrl,
         audioSource: audioUrl,
         officialPreloadToken: token,
         videoTrack: videoTrack,
-        videoTracks: DashSelection.videoLadder(response, videoTrack),
+        videoTracks: ladder,
+        automaticVideo:
+            Pref.officialAutoVideo && DashSelection.supportsAutomatic(ladder),
         audioTrack: DashTrack(
           source: audioUrl,
           id: audio.id,

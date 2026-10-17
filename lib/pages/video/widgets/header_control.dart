@@ -629,7 +629,7 @@ class HeaderControlState extends State<HeaderControl>
                     leading: const Icon(Icons.play_circle_outline, size: 20),
                     title: const Text('选择画质', style: titleStyle),
                     subtitle: Text(
-                      '当前画质 ${videoDetailCtr.currentVideoQa.value?.desc}',
+                      '当前画质 ${videoDetailCtr.videoQualityLabel()}',
                       style: subTitleStyle,
                     ),
                   ),
@@ -965,36 +965,33 @@ class HeaderControlState extends State<HeaderControl>
                     ),
                   ),
                 ),
+                if (videoDetailCtr.canSelectAutomaticVideo)
+                  SliverToBoxAdapter(
+                    child: ListTile(
+                      dense: true,
+                      title: const Text('自动画质'),
+                      trailing: videoDetailCtr.isAutomaticVideo
+                          ? Icon(Icons.done, color: theme.colorScheme.primary)
+                          : null,
+                      onTap: () async {
+                        Get.back();
+                        await videoDetailCtr.selectVideoQuality(null);
+                      },
+                    ),
+                  ),
                 SliverList.builder(
                   itemCount: videoFormat.length,
                   itemBuilder: (context, index) {
                     final item = videoFormat[index];
-                    final isCurr = currentVideoQa.code == item.quality;
+                    final isCurr =
+                        !videoDetailCtr.isAutomaticVideo &&
+                        currentVideoQa.code == item.quality;
                     return ListTile(
                       dense: true,
                       onTap: () async {
-                        if (isCurr) {
-                          return;
-                        }
+                        if (isCurr) return;
                         Get.back();
-                        final int quality = item.quality!;
-                        final newQa = VideoQuality.fromCode(quality);
-                        videoDetailCtr
-                          ..plPlayerController.cacheVideoQa = newQa.code
-                          ..currentVideoQa.value = newQa
-                          ..updatePlayer();
-
-                        SmartDialog.showToast("画质已变为：${newQa.desc}");
-
-                        // update
-                        if (!plPlayerController.tempPlayerConf) {
-                          setting.put(
-                            await ConnectivityUtils.isWiFi
-                                ? SettingBoxKey.defaultVideoQa
-                                : SettingBoxKey.defaultVideoQaCellular,
-                            quality,
-                          );
-                        }
+                        await videoDetailCtr.selectVideoQuality(item.quality!);
                       },
                       // 可能包含会员解锁画质
                       enabled: availableQa.contains(item.quality),

@@ -36,9 +36,9 @@ public final class OfficialVideoTracksCheck {
         OfficialStream refreshed=track(120,"avc1.640033",4500,"b"),freshLow=track(32,"avc1.640033",1100,"b");
         fixed.validateRefresh(new OfficialVideoTracks(refreshed,Arrays.asList(freshLow,refreshed),false));cases++;
         rejects(()->fixed.validateRefresh(null));
-        rejects(()->fixed.validateRefresh(new OfficialVideoTracks(refreshed,Arrays.asList(freshLow,refreshed),true)));
+        fixed.validateRefresh(new OfficialVideoTracks(refreshed,Arrays.asList(freshLow,refreshed),true));cases++;
         rejects(()->fixed.validateRefresh(new OfficialVideoTracks(refreshed,Collections.singletonList(refreshed),false)));
-        rejects(()->fixed.validateRefresh(new OfficialVideoTracks(freshLow,Arrays.asList(freshLow,refreshed),false)));
+        fixed.validateRefresh(new OfficialVideoTracks(freshLow,Arrays.asList(freshLow,refreshed),false));cases++;
         OfficialStream wrongCodec=track(120,"avc1.640034",4500,"b");
         rejects(()->fixed.validateRefresh(new OfficialVideoTracks(wrongCodec,Arrays.asList(freshLow,wrongCodec),false)));
         OfficialStream wrongId=track(64,"avc1.640033",1100,"b");

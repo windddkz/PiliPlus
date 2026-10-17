@@ -25,11 +25,15 @@ class OfficialPlayer extends PlatformPlayer {
   bool _videoControlUncertain = false;
 
   void _acceptQuality(dynamic quality, dynamic automatic) {
-    if (quality is! int || quality <= 0 || automatic is! bool) return;
-    if (videoQuality == quality && automaticVideo == automatic) return;
-    videoQuality = quality;
+    if (quality is! int || quality < 0 || automatic is! bool) return;
+    // Native can confirm the mode before reporting the first actual quality.
+    final actual = quality > 0 ? quality : videoQuality;
+    if (videoQuality == actual && automaticVideo == automatic) return;
+    videoQuality = actual;
     automaticVideo = automatic;
-    _qualityUpdates.add((quality, automatic));
+    if (actual != null) _qualityUpdates.add((actual, automatic));
+    final source = _networkSource;
+    if (source != null) source.onVideoQuality?.call(source, actual, automatic);
   }
 
   OfficialPlayer._(this.fallback)
@@ -55,6 +59,7 @@ class OfficialPlayer extends PlatformPlayer {
   bool _isLive = false;
   bool _audioOnly = false;
   int? _refreshRequest;
+  (int, Completer<void>)? _resourceApplied;
   int _lastRefreshRequest = 0;
   (int, NetworkSource, NetworkSource)? _pendingResource;
   int _refreshAttempts = 0;
@@ -471,6 +476,10 @@ class OfficialPlayer extends PlatformPlayer {
         if (request is int &&
             request > _lastRefreshRequest &&
             _disposing == null) {
+          _finishResourceApplication(StateError('Resource request replaced'));
+          final applied = Completer<void>();
+          _resourceApplied = (request, applied);
+          unawaited(applied.future.catchError((Object _) {}));
           _lastRefreshRequest = request;
           unawaited(_refreshSource(request, _load));
         }
@@ -482,6 +491,7 @@ class OfficialPlayer extends PlatformPlayer {
           _pendingResource = null;
           _networkSource = pending.$3;
           pending.$2.onRefreshed?.call(pending.$2, pending.$3);
+          if (_resourceApplied?.$1 == pending.$1) _finishResourceApplication();
         }
       case 'resource_error':
         _onFirstVideoFrame = null;
@@ -653,9 +663,25 @@ class OfficialPlayer extends PlatformPlayer {
       });
     } catch (_) {
       if (_pendingResource?.$1 == request) _pendingResource = null;
+      if (current() && _resourceApplied?.$1 == request) {
+        _finishResourceApplication(
+          PlatformException(code: 'resource_update_unconfirmed'),
+        );
+      }
       // A canceled or expired native request must not affect the next source.
     } finally {
       if (current()) _refreshRequest = null;
+    }
+  }
+
+  void _finishResourceApplication([Object? error]) {
+    final pending = _resourceApplied;
+    _resourceApplied = null;
+    if (pending == null || pending.$2.isCompleted) return;
+    if (error == null) {
+      pending.$2.complete();
+    } else {
+      pending.$2.completeError(error);
     }
   }
 
@@ -819,6 +845,32 @@ class OfficialPlayer extends PlatformPlayer {
           );
         },
       );
+      // Keep the source identity stable until an in-flight URL replacement is applied.
+      while (_resourceApplied != null) {
+        final updating = _resourceApplied!;
+        try {
+          await updating.$2.future.timeout(
+            const Duration(seconds: 21),
+            onTimeout: () => throw PlatformException(
+              code: 'official_video_switch_result_unavailable',
+            ),
+          );
+        } catch (_) {
+          if (load == _load) _videoControlUncertain = true;
+          rethrow;
+        }
+      }
+      if (load != _load ||
+          _disposed ||
+          _disposing != null ||
+          _dead ||
+          !_nativePrepared) {
+        throw StateError('Playback changed during quality switch');
+      }
+      final previous = _networkSource!;
+      final next = previous.withVideoSelection(quality);
+      _networkSource = next;
+      previous.onRefreshed?.call(previous, next);
     } finally {
       if (identical(_videoControlResult, pending)) {
         _videoControlResult = null;
@@ -828,6 +880,7 @@ class OfficialPlayer extends PlatformPlayer {
   }
 
   void _cancelVideoControl(Object error) {
+    _finishResourceApplication(error);
     if (_videoControlResult case final pending? when !pending.isCompleted) {
       pending.completeError(error);
     }

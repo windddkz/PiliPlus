@@ -612,6 +612,7 @@ class PlPlayerController
 
   late int? cacheVideoQa = PlatformUtils.isMobile ? null : Pref.defaultVideoQa;
   late int cacheAudioQa = Pref.defaultAudioQa;
+  late bool cacheAutomaticVideo = Pref.officialAutoVideo;
   bool enableHeart = true;
   late final String? hwdec = Pref.enableHA ? Pref.hardwareDecoding : null;
 

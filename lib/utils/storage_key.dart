@@ -4,6 +4,8 @@ abstract final class SettingBoxKey {
   static const String btmProgressBehavior = 'btmProgressBehavior',
       defaultVideoQa = 'defaultVideoQa',
       defaultVideoQaCellular = 'defaultVideoQaCellular',
+      officialAutoVideo = 'officialAutoVideo',
+      officialAutoVideoCellular = 'officialAutoVideoCellular',
       defaultAudioQa = 'defaultAudioQa',
       defaultAudioQaCellular = 'defaultAudioQaCellular',
       autoPlayEnable = 'autoPlayEnable',

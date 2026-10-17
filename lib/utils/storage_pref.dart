@@ -225,6 +225,13 @@ abstract final class Pref {
   static int get sliderDuration =>
       _setting.get(SettingBoxKey.sliderDuration, defaultValue: 90);
 
+  static bool get officialAutoVideo =>
+      _setting.get(SettingBoxKey.officialAutoVideo, defaultValue: false);
+  static bool get officialAutoVideoCellular => _setting.get(
+    SettingBoxKey.officialAutoVideoCellular,
+    defaultValue: false,
+  );
+
   static int get defaultVideoQa => _setting.get(
     SettingBoxKey.defaultVideoQa,
     defaultValue: VideoQuality.super8k.code,

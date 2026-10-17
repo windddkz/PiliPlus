@@ -39,7 +39,8 @@ final class OfficialVideoTracks {
         throw new IllegalArgumentException("Quality unavailable in current video ladder");
     }
     void validateRefresh(OfficialVideoTracks next) {
-        if(next==null || origin.id!=next.origin.id || automatic!=next.automatic || tracks.size()!=next.tracks.size())
+        // Controls may change the selected origin/mode; refresh must preserve the allowed ladder.
+        if(next==null || tracks.size()!=next.tracks.size())
             throw new IllegalArgumentException("Refresh changed video policy");
         for(OfficialStream track:tracks) {
             OfficialStream replacement=next.get(track.id);

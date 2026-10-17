@@ -71,17 +71,20 @@ void main() {
   );
   NetworkSource ladderSource({
     Future<NetworkSource?> Function(NetworkSource)? refresh,
+    void Function(NetworkSource, NetworkSource)? onRefreshed,
+    void Function(NetworkSource, int?, bool)? onVideoQuality,
+    String suffix = '',
   }) {
     final audio = preloadedSource().audioTrack!;
     final video = DashTrack(
-      source: 'https://example.invalid/120',
+      source: 'https://example.invalid/120$suffix',
       id: 120,
       bandwidth: 4000,
       codecs: 'avc1.640033',
       urls: const [],
     );
     final low = DashTrack(
-      source: 'https://example.invalid/32',
+      source: 'https://example.invalid/32$suffix',
       id: 32,
       bandwidth: 1000,
       codecs: 'avc1.640033',
@@ -95,13 +98,15 @@ void main() {
       videoTracks: [video, low],
       automaticVideo: true,
       refresh: refresh,
+      onRefreshed: onRefreshed,
+      onVideoQuality: onVideoQuality,
     );
   }
 
-  Future<OfficialPlayer> preparedLadder() async {
+  Future<OfficialPlayer> preparedLadder({NetworkSource? source}) async {
     final player = await create();
     final ready = player.openSource(
-      ladderSource(),
+      source ?? ladderSource(),
       userAgent: 'test',
       referer: 'test',
       audioOnly: false,
@@ -237,6 +242,306 @@ void main() {
       await player.dispose();
     },
   );
+
+  Future<void> finishQuality(int request, {bool automatic = false}) => emit({
+    'event': 'video_control',
+    'requestId': request,
+    'success': true,
+    'automaticVideo': automatic,
+  });
+
+  test(
+    'successful quality updates the recoverable source and keeps its audio',
+    () async {
+      final changes = <(NetworkSource, NetworkSource)>[];
+      final source = ladderSource(onRefreshed: (a, b) => changes.add((a, b)));
+      final player = await preparedLadder(source: source);
+      final fixed = player.setVideoQuality(32);
+      await Future<void>.delayed(Duration.zero);
+      await finishQuality((calls.last.arguments as Map)['requestId'] as int);
+      await fixed;
+      final low = changes.single.$2;
+      expect(changes.single.$1, same(source));
+      expect(low.videoTrack!.id, 32);
+      expect(low.automaticVideo, false);
+      expect(low.audioTrack, same(source.audioTrack));
+      expect(low.videoTracks, source.videoTracks);
+      final auto = player.setVideoQuality(null);
+      await Future<void>.delayed(Duration.zero);
+      await finishQuality(
+        (calls.last.arguments as Map)['requestId'] as int,
+        automatic: true,
+      );
+      await auto;
+      expect(changes.last.$1, same(low));
+      expect(changes.last.$2.automaticVideo, true);
+      final ready = player.openSource(
+        changes.last.$2,
+        userAgent: 'test',
+        referer: 'test',
+        audioOnly: false,
+      );
+      await Future<void>.delayed(Duration.zero);
+      final opening =
+          calls.lastWhere((c) => c.method == 'open').arguments as Map;
+      expect(opening['automaticVideo'], true);
+      expect(opening['sourceTrack']['id'], 32);
+      expect(opening['audioTrack']['id'], 30251);
+      await emit({'event': 'prepared', 'load': 2});
+      await ready;
+      await player.dispose();
+    },
+  );
+
+  for (final refreshFirst in [false, true]) {
+    test(
+      'quality commit and refresh application order: refreshFirst=$refreshFirst',
+      () async {
+        final response = Completer<NetworkSource?>();
+        final changes = <(NetworkSource, NetworkSource)>[];
+        void accept(NetworkSource a, NetworkSource b) => changes.add((a, b));
+        final source = ladderSource(
+          refresh: (_) => response.future,
+          onRefreshed: accept,
+        );
+        final fresh = ladderSource(suffix: '?fresh', onRefreshed: accept);
+        final player = await preparedLadder(source: source);
+        var completed = false;
+        final fixed = player.setVideoQuality(32).then((_) => completed = true);
+        await Future<void>.delayed(Duration.zero);
+        final id = (calls.last.arguments as Map)['requestId'] as int;
+        await emit({'event': 'resource_refresh', 'requestId': 301});
+        if (!refreshFirst) await finishQuality(id);
+        expect(changes, isEmpty);
+        expect(completed, false);
+        response.complete(fresh);
+        await Future<void>.delayed(Duration.zero);
+        expect(changes, isEmpty); // Method reply is not resource application.
+        await emit({'event': 'resource_updated', 'requestId': 301});
+        if (refreshFirst) await finishQuality(id);
+        await fixed;
+        expect(changes.length, 2);
+        expect(changes[0], (source, fresh));
+        expect(changes[1].$1, same(fresh));
+        expect(changes[1].$2.videoSource, 'https://example.invalid/32?fresh');
+        expect(changes[1].$2.automaticVideo, false);
+        expect(changes[1].$2.audioTrack, same(fresh.audioTrack));
+        await player.dispose();
+      },
+    );
+  }
+
+  test(
+    'refresh after quality change requests the committed source selection',
+    () async {
+      NetworkSource? refreshedFrom;
+      final changes = <NetworkSource>[];
+      final source = ladderSource(
+        onRefreshed: (_, next) => changes.add(next),
+        refresh: (current) async {
+          refreshedFrom = current;
+          return ladderSource(suffix: '?fresh')
+              .withVideoSelection(current.videoTrack!.id);
+        },
+      );
+      final player = await preparedLadder(source: source);
+      final fixed = player.setVideoQuality(32);
+      await Future<void>.delayed(Duration.zero);
+      await finishQuality((calls.last.arguments as Map)['requestId'] as int);
+      await fixed;
+      await emit({'event': 'resource_refresh', 'requestId': 302});
+      await Future<void>.delayed(Duration.zero);
+      expect(refreshedFrom, same(changes.single));
+      final request =
+          calls.lastWhere((c) => c.method == 'resourceUpdate').arguments as Map;
+      expect(request['sourceTrack']['id'], 32);
+      expect(request['automaticVideo'], false);
+      await emit({'event': 'resource_updated', 'requestId': 302});
+      await player.dispose();
+    },
+  );
+
+  test(
+    'dispose cancels successful native switch waiting for resource application',
+    () async {
+      final changes = <NetworkSource>[];
+      final response = Completer<NetworkSource?>();
+      final player = await preparedLadder(
+        source: ladderSource(
+          refresh: (_) => response.future,
+          onRefreshed: (_, next) => changes.add(next),
+        ),
+      );
+      final fixed = player.setVideoQuality(32);
+      final failed = expectLater(fixed, throwsStateError);
+      await Future<void>.delayed(Duration.zero);
+      final id = (calls.last.arguments as Map)['requestId'] as int;
+      await emit({'event': 'resource_refresh', 'requestId': 303});
+      await finishQuality(id);
+      await player.dispose();
+      await failed;
+      response.complete(ladderSource());
+      await Future<void>.delayed(Duration.zero);
+      expect(changes, isEmpty);
+    },
+  );
+
+  test(
+    'lost quality reply blocks further commands until source is reopened',
+    () async {
+      final player = await preparedLadder();
+      messenger.setMockMethodCallHandler(commands, (call) async {
+        calls.add(call);
+        if (call.method == 'videoControl') {
+          throw PlatformException(code: 'lost_reply');
+        }
+        return null;
+      });
+      await expectLater(
+        player.setVideoQuality(32),
+        throwsA(isA<PlatformException>()),
+      );
+      await expectLater(
+        player.setVideoQuality(120),
+        throwsA(isA<PlatformException>()),
+      );
+      expect(calls.where((c) => c.method == 'videoControl').length, 1);
+      await player.dispose();
+    },
+  );
+
+  for (final waitingResource in [false, true]) {
+    test(
+      'quality timeout preserves source and rejects late completion: resource=$waitingResource',
+      () async {
+        final changes = <NetworkSource>[];
+        final player = await preparedLadder(
+          source: ladderSource(onRefreshed: (_, next) => changes.add(next)),
+        );
+        final result = player.setVideoQuality(32);
+        final failed = expectLater(
+          result,
+          throwsA(
+            isA<PlatformException>().having(
+              (e) => e.code,
+              'code',
+              'official_video_switch_result_unavailable',
+            ),
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        final request = (calls.last.arguments as Map)['requestId'];
+        if (waitingResource) {
+          await emit({'event': 'resource_refresh', 'requestId': 399});
+          await emit({
+            'event': 'video_control',
+            'requestId': request,
+            'success': true,
+            'automaticVideo': false,
+          });
+        }
+        await failed;
+        await emit({
+          'event': 'video_control',
+          'requestId': request,
+          'success': true,
+          'automaticVideo': false,
+        });
+        await expectLater(
+          player.setVideoQuality(120),
+          throwsA(isA<PlatformException>()),
+        );
+        expect(changes, isEmpty);
+        expect(calls.where((c) => c.method == 'videoControl').length, 1);
+        await player.dispose();
+      },
+    );
+  }
+
+  test(
+    'native mode without a quality never invents the requested grade',
+    () async {
+      final seen = <(NetworkSource, int?, bool)>[];
+      final source = ladderSource(
+        onVideoQuality: (source, qa, auto) => seen.add((source, qa, auto)),
+      );
+      final player = await preparedLadder(source: source);
+      addTearDown(player.dispose);
+      final grades = <(int, bool)>[];
+      final sub = player.qualityUpdates.listen(grades.add);
+      addTearDown(sub.cancel);
+      Future<void> mode(bool automatic) => emit({
+        'event': 'state',
+        'position': 0,
+        'duration': 60000,
+        'playing': true,
+        'speed': 1.0,
+        'width': 1920,
+        'height': 1080,
+        'bufferedPercent': 0,
+        'videoQuality': 0,
+        'automaticVideo': automatic,
+      });
+      await mode(true);
+      expect(player.automaticVideo, true);
+      expect(player.videoQuality, null);
+      expect(seen, [(source, null, true)]);
+      expect(grades, isEmpty);
+      await emit({'event': 'quality', 'quality': -1, 'automaticVideo': false});
+      expect(player.automaticVideo, true);
+      await emit({'event': 'quality', 'quality': 80, 'automaticVideo': true});
+      expect(seen.last, (source, 80, true));
+      expect(grades, [(80, true)]);
+      await mode(true);
+      expect(player.videoQuality, 80);
+      expect(seen.length, 2);
+      await mode(false);
+      expect(seen.last, (source, 80, false));
+      expect(grades.last, (80, false));
+    },
+  );
+
+  test('actual quality callback follows current source through selection and replacement', () async {
+    final seen = <(NetworkSource, int?, bool)>[];
+    NetworkSource? committed;
+    void quality(NetworkSource source, int? qa, bool auto) =>
+        seen.add((source, qa, auto));
+    final original = ladderSource(
+      onVideoQuality: quality,
+      onRefreshed: (_, next) => committed = next,
+    );
+    final player = await preparedLadder(source: original);
+    addTearDown(player.dispose);
+    await emit({'event': 'quality', 'quality': 120, 'automaticVideo': true});
+    expect(seen.single, (original, 120, true));
+    final fixed = player.setVideoQuality(32);
+    await Future<void>.delayed(Duration.zero);
+    await finishQuality((calls.last.arguments as Map)['requestId'] as int);
+    await fixed;
+    expect(committed!.onVideoQuality, same(original.onVideoQuality));
+    await emit({'event': 'quality', 'quality': 32, 'automaticVideo': false});
+    expect(seen.last, (committed!, 32, false));
+    final next = ladderSource(onVideoQuality: quality);
+    final opening = player.openSource(
+      next,
+      userAgent: 'test',
+      referer: 'test',
+      audioOnly: false,
+    );
+    await Future<void>.delayed(Duration.zero);
+    await emit({'event': 'quality', 'quality': 120, 'automaticVideo': true});
+    expect(seen.length, 2);
+    await emit({
+      'event': 'quality',
+      'quality': 120,
+      'automaticVideo': true,
+      'load': 2,
+    });
+    expect(seen.last, (next, 120, true));
+    await emit({'event': 'prepared', 'load': 2});
+    await opening;
+    await player.dispose();
+  });
 
   test(
     'open and refresh preserve video ladder and independent lossless audio',

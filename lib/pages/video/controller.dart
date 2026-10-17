@@ -62,6 +62,8 @@ import 'package:PiliPlus/utils/extension/size_ext.dart';
 import 'package:PiliPlus/utils/page_utils.dart';
 import 'package:PiliPlus/utils/platform_utils.dart';
 import 'package:PiliPlus/utils/storage.dart';
+import 'package:PiliPlus/utils/storage_key.dart';
+import 'package:PiliPlus/plugin/pl_player/official_player.dart';
 import 'package:PiliPlus/utils/storage_pref.dart';
 import 'package:PiliPlus/utils/theme_utils.dart';
 import 'package:PiliPlus/utils/utils.dart';
@@ -118,6 +120,131 @@ class VideoDetailController extends GetxController
 
   /// 播放器配置 画质 音质 解码格式
   final Rxn<VideoQuality> currentVideoQa = Rxn<VideoQuality>();
+  final automaticVideo = false.obs;
+  final actualVideoQa = Rxn<VideoQuality>();
+  final qualityChanging = false.obs;
+  Future<void> _qualitySelectionTail = Future<void>.value();
+
+  bool get isAutomaticVideo =>
+      automaticVideo.value &&
+      plPlayerController.videoPlayerController is OfficialPlayer;
+
+  String videoQualityLabel({bool short = false}) {
+    final automatic = isAutomaticVideo;
+    final qa = automatic ? actualVideoQa.value : currentVideoQa.value;
+    if (qa == null) return automatic ? '自动' : '';
+    return '${automatic ? '自动 · ' : ''}${short ? qa.shortDesc : qa.desc}';
+  }
+
+  bool get canSelectAutomaticVideo {
+    // Register backend changes for the reactive player menu.
+    plPlayerController.backendRevision.value;
+    final source = plPlayerController.dataSource;
+    return plPlayerController.videoPlayerController is OfficialPlayer &&
+        !isFileSource &&
+        !plPlayerController.onlyPlayAudio.value &&
+        source is NetworkSource &&
+        DashSelection.supportsAutomatic(source.videoTracks);
+  }
+
+  void _acceptVideoQuality(NetworkSource source, int? quality, bool automatic) {
+    if (isClosed || !identical(plPlayerController.dataSource, source)) return;
+    final qa = VideoQuality.values
+        .where((item) => item.code == quality)
+        .firstOrNull;
+    actualVideoQa.value = qa;
+    if (qa != null) currentVideoQa.value = qa;
+    automaticVideo.value = automatic;
+  }
+
+  Future<void> selectVideoQuality(int? quality) {
+    final request = _videoUrlRequest;
+    final result = _qualitySelectionTail.then(
+      (_) => _selectVideoQuality(quality, request),
+    );
+    _qualitySelectionTail = result.catchError((Object _) {});
+    return result;
+  }
+
+  Future<void> _selectVideoQuality(int? quality, int request) async {
+    if (!_isCurrentVideoUrl(request)) return;
+    qualityChanging.value = true;
+    try {
+      final isWiFi = await ConnectivityUtils.isWiFi;
+      if (!_isCurrentVideoUrl(request)) return;
+      final player = plPlayerController.videoPlayerController;
+      final source = plPlayerController.dataSource;
+      if (quality == null && !canSelectAutomaticVideo) {
+        throw StateError('Automatic quality unavailable');
+      }
+      if (quality != null &&
+          (isFileSource ||
+              data.dash?.video?.any((track) => track.id == quality) != true)) {
+        throw StateError('Requested quality unavailable');
+      }
+      if (player is OfficialPlayer &&
+          source is NetworkSource &&
+          (quality == null ||
+              source.videoTracks.any((track) => track.id == quality))) {
+        await player.setVideoQuality(quality);
+      } else {
+        await updatePlayer(videoQuality: quality, automatic: false);
+        if (plPlayerController.dataStatus.value != .loaded ||
+            plPlayerController.dataSource is! NetworkSource ||
+            (plPlayerController.dataSource as NetworkSource).videoTrack?.id !=
+                quality) {
+          throw StateError('Quality reopen failed');
+        }
+      }
+      if (!_isCurrentVideoUrl(request)) return;
+      final applied = plPlayerController.dataSource;
+      if (applied is! NetworkSource ||
+          applied.automaticVideo != (quality == null) ||
+          (quality != null && applied.videoTrack?.id != quality)) {
+        throw StateError('Quality source changed');
+      }
+      plPlayerController.cacheAutomaticVideo = quality == null;
+      automaticVideo.value = quality == null;
+      if (quality != null) {
+        plPlayerController.cacheVideoQa = quality;
+        currentVideoQa.value = VideoQuality.fromCode(quality);
+        firstVideo = findVideoByQa(quality, setCodecs: true);
+      }
+      if (!plPlayerController.tempPlayerConf) {
+        try {
+          await setting.putAll({
+            (isWiFi
+                    ? SettingBoxKey.officialAutoVideo
+                    : SettingBoxKey.officialAutoVideoCellular):
+                quality == null,
+            (isWiFi
+                    ? SettingBoxKey.defaultVideoQa
+                    : SettingBoxKey.defaultVideoQaCellular):
+                ?quality,
+          });
+        } catch (_) {
+          if (_isCurrentVideoUrl(request)) {
+            SmartDialog.showToast('画质已切换，但设置未能保存');
+          }
+          return;
+        }
+      }
+      if (_isCurrentVideoUrl(request)) {
+        SmartDialog.showToast(
+          quality == null
+              ? '已开启自动画质'
+              : '画质已变为：${VideoQuality.fromCode(quality).desc}',
+        );
+      }
+    } catch (error) {
+      if (_isCurrentVideoUrl(request)) {
+        SmartDialog.showToast('画质切换失败：${OfficialPlayer.failureCode(error)}');
+      }
+    } finally {
+      if (!isClosed) qualityChanging.value = false;
+    }
+  }
+
   AudioQuality? currentAudioQa;
   late VideoDecodeFormatType currentDecodeFormats;
 
@@ -690,9 +817,9 @@ class VideoDetailController extends GetxController
   }
 
   /// 更新画质、音质
-  void updatePlayer() {
-    final currentVideoQa = this.currentVideoQa.value;
-    if (currentVideoQa == null) return;
+  Future<void> updatePlayer({int? videoQuality, bool? automatic}) async {
+    final quality = videoQuality ?? currentVideoQa.value?.code;
+    if (quality == null) return;
     final shouldPlay =
         audioSessionHandler?.wantsPlayback(plPlayerController) ??
         plPlayerController.playerStatus.isPlaying;
@@ -703,7 +830,7 @@ class VideoDetailController extends GetxController
       ..isBuffering.value = false
       ..buffered.value = 0;
 
-    firstVideo = findVideoByQa(currentVideoQa.code, setCodecs: true);
+    firstVideo = findVideoByQa(quality, setCodecs: true);
     videoUrl = VideoUtils.getCdnUrl(firstVideo.playUrls);
     _videoTrack = DashTrack(
       source: videoUrl!,
@@ -730,7 +857,7 @@ class VideoDetailController extends GetxController
       );
     }
 
-    playerInit(autoplay: shouldPlay);
+    await playerInit(autoplay: shouldPlay, automatic: automatic);
   }
 
   Future<void>? initPlayerIfNeeded(bool autoFullScreenFlag) {
@@ -749,7 +876,13 @@ class VideoDetailController extends GetxController
   Future<void> playerInit({
     bool? autoplay,
     bool autoFullScreenFlag = false,
+    bool? automatic,
   }) async {
+    automaticVideo.value = false;
+    actualVideoQa.value = null;
+    final ladder = !isFileSource && _videoTrack != null && _audioTrack != null
+        ? DashSelection.videoLadder(data, _videoTrack!)
+        : const <DashTrack>[];
     Duration? seek = defaultST ?? playedTime;
     if (seek == .zero) seek = null;
     seek ??= getFirstSegment();
@@ -767,9 +900,11 @@ class VideoDetailController extends GetxController
               officialPreloadToken: data.officialPreloadToken,
               videoTrack: _videoTrack,
               audioTrack: _audioTrack,
-              videoTracks: _videoTrack != null && _audioTrack != null
-                  ? DashSelection.videoLadder(data, _videoTrack!)
-                  : const [],
+              videoTracks: ladder,
+              automaticVideo:
+                  (automatic ?? plPlayerController.cacheAutomaticVideo) &&
+                  DashSelection.supportsAutomatic(ladder),
+              onVideoQuality: _acceptVideoQuality,
               refresh: _refreshOfficialSource,
               onRefreshed: _acceptRefreshedSource,
             ),
@@ -922,6 +1057,7 @@ class VideoDetailController extends GetxController
               ),
         refresh: _refreshOfficialSource,
         onRefreshed: _acceptRefreshedSource,
+        onVideoQuality: _acceptVideoQuality,
       );
       return next;
     }
@@ -990,7 +1126,10 @@ class VideoDetailController extends GetxController
             : Pref.defaultVideoQaCellular
         ..cacheAudioQa = isWiFi
             ? Pref.defaultAudioQa
-            : Pref.defaultAudioQaCellular;
+            : Pref.defaultAudioQaCellular
+        ..cacheAutomaticVideo = isWiFi
+            ? Pref.officialAutoVideo
+            : Pref.officialAutoVideoCellular;
       preferCodecs = isWiFi ? Pref.preferCodecs : Pref.preferCodecsCellular;
     }
 

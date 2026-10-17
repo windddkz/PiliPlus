@@ -17,8 +17,31 @@ class NetworkSource extends DataSource {
   final DashTrack? audioTrack;
   final List<DashTrack> videoTracks;
   final bool automaticVideo;
+  final void Function(NetworkSource source, int? quality, bool automatic)?
+  onVideoQuality;
   final Future<NetworkSource?> Function(NetworkSource source)? refresh;
   final void Function(NetworkSource previous, NetworkSource next)? onRefreshed;
+
+  NetworkSource withVideoSelection(int? quality) {
+    final selected = quality == null
+        ? videoTrack
+        : videoTracks.where((track) => track.id == quality).firstOrNull;
+    if (selected == null || !videoTracks.contains(selected)) {
+      throw ArgumentError.value(quality, 'quality', 'Unavailable video track');
+    }
+    return NetworkSource(
+      videoSource: selected.source,
+      audioSource: audioSource,
+      officialPreloadToken: officialPreloadToken,
+      videoTrack: selected,
+      audioTrack: audioTrack,
+      videoTracks: videoTracks,
+      automaticVideo: quality == null,
+      refresh: refresh,
+      onRefreshed: onRefreshed,
+      onVideoQuality: onVideoQuality,
+    );
+  }
 
   NetworkSource({
     required super.videoSource,
@@ -30,6 +53,7 @@ class NetworkSource extends DataSource {
     this.automaticVideo = false,
     this.refresh,
     this.onRefreshed,
+    this.onVideoQuality,
   }) : videoTracks = List.unmodifiable(videoTracks);
 }
 

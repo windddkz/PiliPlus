@@ -942,10 +942,10 @@ final class OfficialRuntime {
     private Object updatedAsset(Object old,Bundle original,Bundle next) throws Exception {
         OfficialStream source=streamInfo(next.getBundle("sourceTrack"),next.getString("source"));
         OfficialStream before=streamInfo(original.getBundle("sourceTrack"),original.getString("source"));
-        if(source==null || before==null || source.id!=before.id)throw new IOException("Refresh changed source track");
+        if(source==null || before==null)throw new IOException("Refresh missing source track");
         OfficialVideoTracks policy=videoPolicy(original),replacement=videoPolicy(next);
         if(policy!=null)policy.validateRefresh(replacement);
-        else if(replacement!=null)throw new IOException("Refresh added a video policy");
+        else if(replacement!=null || source.id!=before.id)throw new IOException("Refresh changed single source policy");
         Object scheme=invoke(old,"getScheme"),options=invoke(old,"getOption");
         if(original.getBoolean("isLive",false)) {
             if(!old.getClass().getName().endsWith("$Normal") || !"LIVE".equals(scheme.toString()) || next.getString("audio")!=null)
