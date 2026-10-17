@@ -1109,6 +1109,32 @@
         "android/validation/OfficialForegroundPreloadCheck.java",
         "android/validation/OfficialPreloadQueueCheck.java"
       ]
+    },
+    {
+      "commit": "d9ad5b91e248b853f9d2ff176f036358143a6de1",
+      "title": "feat(preload): retain twenty media items and prepare four concurrently",
+      "source_candidate": 326,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialMediaCache.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPreloadCache.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialMediaCacheCheck.java",
+        "android/validation/OfficialPreloadCacheTest.java",
+        "android/validation/OfficialPreloadQueueCheck.java"
+      ]
+    },
+    {
+      "commit": "17a90b1f0511c9cc14206a7366c091ae84779616",
+      "title": "revert(video): remove startup cover overlay and its frame callback",
+      "source_candidate": 327,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "lib/pages/video/view.dart",
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "lib/plugin/pl_player/view/view.dart",
+        "validation/official_seek_test.dart"
+      ]
     }
   ]
 }
