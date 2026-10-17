@@ -453,7 +453,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
       BottomControlType.time => Obx(
         () => _VideoTime(
           position: DurationUtils.formatDuration(
-            plPlayerController.position.value,
+            plPlayerController.progress,
           ),
           duration: DurationUtils.formatDuration(
             plPlayerController.duration.value,
@@ -950,7 +950,7 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
   }
 
   void _onHorizontalDragStart() {
-    plPlayerController.onSeekStart(plPlayerController.position.value);
+    plPlayerController.onSeekStart(plPlayerController.progress);
   }
 
   void _onHorizontalDragUpdate(double dx) {

@@ -27,6 +27,7 @@ import 'package:PiliPlus/plugin/pl_player/models/fullscreen_mode.dart';
 import 'package:PiliPlus/plugin/pl_player/models/heart_beat_type.dart';
 import 'package:PiliPlus/plugin/pl_player/models/play_repeat.dart';
 import 'package:PiliPlus/plugin/pl_player/models/play_status.dart';
+import 'package:PiliPlus/plugin/pl_player/models/seek_display.dart';
 import 'package:PiliPlus/plugin/pl_player/models/video_fit_type.dart';
 import 'package:PiliPlus/plugin/pl_player/utils/danmaku_options.dart';
 import 'package:PiliPlus/plugin/pl_player/utils/fullscreen.dart';
@@ -167,6 +168,7 @@ class PlPlayerController
 
   Future<void> suspendForAudioPage() {
     final revision = ++_sourceRevision;
+    _seekDisplay.reset();
     unawaited(audioSessionHandler?.release(this));
     final stopping = _cancelPreparingOfficial();
     return _enqueuePlayer(() async {
@@ -216,7 +218,10 @@ class PlPlayerController
 
   final RxInt position = RxInt(0);
   final RxInt seekPosition = RxInt(0);
-  int get progress => isSeeking.value ? seekPosition.value : position.value;
+  final _seekDisplay = SeekDisplay();
+  int get progress => isSeeking.value
+      ? seekPosition.value
+      : _seekDisplay.target.value?.inSeconds ?? position.value;
 
   int get positionInMilliseconds =>
       videoPlayerController?.state.position.inMilliseconds ?? 0;
@@ -863,6 +868,7 @@ class PlPlayerController
     bool autoFullScreenFlag = false,
   }) {
     final revision = ++_sourceRevision;
+    _seekDisplay.reset();
     if (_playerCount == 0) return Future.value();
     _processing = true;
     // Invalidate focus resume now; never wait for the focus queue from this queue.
@@ -1642,15 +1648,32 @@ class PlPlayerController
   }
 
   Future<void> seek(Duration position, {bool isSeek = false}) async {
-    if (isSeek) {
-      /// 拖动进度条调节时，不等待第一帧，防止抖动
-      await _videoPlayerController?.stream.buffer.first;
-    }
-    danmakuController?.clear();
+    final player = _videoPlayerController;
+    if (player == null) return;
+    final sourceRevision = _sourceRevision;
+    final request = player is OfficialPlayer
+        ? _seekDisplay.begin(position)
+        : null;
     try {
-      await _videoPlayerController?.seek(position);
+      if (isSeek && player is! OfficialPlayer) {
+        await player.stream.buffer.first;
+      }
+      if (sourceRevision != _sourceRevision ||
+          !identical(player, _videoPlayerController)) {
+        return;
+      }
+      danmakuController?.clear();
+      await player.seek(position);
+      if (sourceRevision != _sourceRevision ||
+          !identical(player, _videoPlayerController)) {
+        return;
+      }
       _updateIOSPip(position);
     } catch (e) {
+      if (sourceRevision != _sourceRevision ||
+          !identical(player, _videoPlayerController)) {
+        return;
+      }
       if (e is PlatformException && e.code == 'official_seek_timeout') {
         SmartDialog.showToast('跳转超时，已停在实际到达的位置，可重新拖动');
       } else if (e is PlatformException &&
@@ -1658,6 +1681,8 @@ class PlPlayerController
         SmartDialog.showToast('未收到跳转结果，请重新打开视频后再拖动');
       }
       if (kDebugMode) debugPrint('seek failed: $e');
+    } finally {
+      if (request != null) _seekDisplay.finish(request);
     }
   }
 
@@ -1672,7 +1697,7 @@ class PlPlayerController
     _heartDuration = position.inSeconds;
 
     if (duration.value != 0) {
-      seek(position, isSeek: isSeek);
+      await seek(position, isSeek: isSeek);
     } else {
       // if (kDebugMode) debugPrint('seek duration else');
       _subForSeek?.cancel();
@@ -2160,6 +2185,7 @@ class PlPlayerController
     unawaited(audioSessionHandler?.release(this));
     _playerCount = 0;
     ++_sourceRevision;
+    _seekDisplay.reset();
     _processing = false;
     if (removeSafeArea) {
       showSystemBar();
