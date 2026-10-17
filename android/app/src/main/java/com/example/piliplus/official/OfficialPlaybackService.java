@@ -223,7 +223,8 @@ public final class OfficialPlaybackService extends Service {
     @Override
     public void onTrimMemory(int level) {
         super.onTrimMemory(level);
-        if (level >= TRIM_MEMORY_RUNNING_LOW && worker != null)
+        // UI_HIDDEN reports visibility, not memory pressure.
+        if (level != TRIM_MEMORY_UI_HIDDEN && level >= TRIM_MEMORY_RUNNING_LOW && worker != null)
             worker.post(() -> {
                 try {
                     runtime.trimPreloads();
