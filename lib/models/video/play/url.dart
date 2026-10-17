@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' show max, min;
 
 import 'package:PiliPlus/models/common/video/audio_quality.dart';
@@ -45,6 +46,20 @@ class PlayUrlModel {
   // Local-only identity; never accepted from the server response.
   String? officialPreloadToken;
   List<VideoItem>? officialPreloadVideos;
+  String? _responseSnapshot;
+
+  PlayUrlModel? copyForPlayback() {
+    final snapshot = _responseSnapshot;
+    if (snapshot == null) return null;
+    final copy = PlayUrlModel.fromJson(jsonDecode(snapshot))
+      .._responseSnapshot = snapshot
+      ..officialPreloadToken = officialPreloadToken
+      ..lastPlayTime = lastPlayTime;
+    copy.officialPreloadVideos = copy.dash?.video == null
+        ? null
+        : List.unmodifiable(copy.dash!.video!);
+    return copy;
+  }
 
   late int _lastPlayTime;
   int get lastPlayTime => _lastPlayTime;
@@ -92,7 +107,14 @@ class PlayUrlModel {
     return best;
   }
 
-  PlayUrlModel.fromJson(Map<String, dynamic> json) {
+  PlayUrlModel.fromJson(
+    Map<String, dynamic> json, {
+    bool retainSnapshot = false,
+  }) {
+    if (retainSnapshot) {
+      final snapshot = jsonEncode(json);
+      if (snapshot.length <= 512 * 1024) _responseSnapshot = snapshot;
+    }
     from = json['from'];
     result = json['result'];
     message = json['message'];
