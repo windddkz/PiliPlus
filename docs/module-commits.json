@@ -1088,6 +1088,27 @@
         "android/official_audio/graph_adapter.c",
         "validation/dolby_loudness_test.py"
       ]
+    },
+    {
+      "commit": "32c89d5000893a1abbdc9339cb91db567fea743b",
+      "title": "fix(cache): size tracks independently and retain recently played media",
+      "source_candidate": 324,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialMediaCache.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/official_audio/media_cache.h",
+        "android/validation/OfficialMediaCacheCheck.java",
+        "android/validation/media_cache_test.c"
+      ]
+    },
+    {
+      "commit": "dd243223f43628747d7b7402b6fe2f4260ff0541",
+      "title": "test(preload): verify retained candidates and runtime ownership rules",
+      "source_candidate": 324,
+      "files": [
+        "android/validation/OfficialForegroundPreloadCheck.java",
+        "android/validation/OfficialPreloadQueueCheck.java"
+      ]
     }
   ]
 }
