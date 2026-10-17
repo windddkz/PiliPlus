@@ -5,6 +5,7 @@ import 'package:PiliPlus/models/common/video/video_decode_type.dart';
 import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
 import 'package:PiliPlus/plugin/pl_player/official_player.dart';
 import 'package:flutter/services.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -118,6 +119,43 @@ void main() {
     await ready;
     return player;
   }
+
+  test(
+    'plain subtitles stay on official playback and follow seek/disable',
+    () async {
+      final player = await preparedLadder();
+      await player.setSubtitleTrack(
+        SubtitleTrack(
+          'memory://WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n你好\n第二行\n\n00:00:02.000 --> 00:00:04.000\n重叠',
+          '中文',
+          'zh',
+          uri: true,
+        ),
+      );
+      Future<void> at(int position) => emit({
+        'event': 'state',
+        'position': position,
+        'duration': 10000,
+        'playing': false,
+        'speed': 1.0,
+        'width': 640,
+        'height': 360,
+        'bufferedPercent': 100,
+      });
+      await at(1000);
+      expect(player.state.subtitle.toString(), '你好\n第二行');
+      await at(2000);
+      expect(player.state.subtitle.toString(), '你好\n第二行\n重叠');
+      await at(4000);
+      expect(player.state.subtitle.isEmpty, true);
+      await at(1000);
+      expect(player.state.subtitle.toString(), '你好\n第二行');
+      await player.setSubtitleTrack(SubtitleTrack.no());
+      await at(2000);
+      expect(player.state.subtitle.isEmpty, true);
+      await player.dispose();
+    },
+  );
 
   test(
     'warmup retains validated device codec order across idle disposal',

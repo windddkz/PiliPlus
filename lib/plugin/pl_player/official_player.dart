@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -6,6 +7,8 @@ import 'package:PiliPlus/models/common/video/video_decode_type.dart';
 import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
+
+import 'package:PiliPlus/plugin/pl_player/text_subtitles.dart';
 
 /// The Android process owns audio, video and their clock; Dart only sends controls.
 class OfficialPlayer extends PlatformPlayer {
@@ -103,6 +106,16 @@ class OfficialPlayer extends PlatformPlayer {
     'below_official_threshold' => '官方响度：低于官方启用门限',
     _ => '官方响度：元数据无效，未请求处理',
   };
+  TextSubtitles? _subtitles;
+  int _subtitleRevision = 0;
+
+  void _updateSubtitle() {
+    final next = Subtitle.raw(_subtitles?.at(state.position) ?? '');
+    if (state.subtitle == next) return;
+    state.subtitle = next;
+    subtitleController.add(next);
+  }
+
   int? audioSession;
   int? dolbyEndpoint;
   String routeEvidence = 'unavailable';
@@ -367,6 +380,9 @@ class OfficialPlayer extends PlatformPlayer {
     _cancelVideoControl(StateError('Source changed during quality switch'));
     _videoControlTail = Future<void>.value();
     _videoControlUncertain = false;
+    ++_subtitleRevision;
+    _subtitles = null;
+    _updateSubtitle();
     var load = ++_load;
     _onFirstVideoFrame = audioOnly ? null : onFirstVideoFrame;
     _isLive = isLive;
@@ -583,6 +599,7 @@ class OfficialPlayer extends PlatformPlayer {
         final initial = matches(_initialSeekTarget);
         if (!initial && !matches(_seekTarget)) return;
         state.position = Duration(milliseconds: position);
+        _updateSubtitle();
         positionController.add(state.position);
         final error = event['timedOut'] == true
             ? PlatformException(code: 'official_seek_timeout')
@@ -650,6 +667,7 @@ class OfficialPlayer extends PlatformPlayer {
         dolbyEndpoint = (event['dolbyEndpoint'] as num?)?.toInt();
         dolbyControlsApplicable = event['dolbyControlsApplicable'] == true;
         routeEvidence = event['routeEvidence'] as String? ?? 'unavailable';
+        _updateSubtitle();
         positionController.add(state.position);
         durationController.add(state.duration);
         if (playingChanged) playingController.add(playing);
@@ -957,8 +975,26 @@ class OfficialPlayer extends PlatformPlayer {
 
   @override
   Future<void> setSubtitleTrack(SubtitleTrack track) async {
-    if (track.id == 'no') return;
-    await (await fallback('字幕渲染')).setSubtitleTrack(track);
+    if (_disposed || _disposing != null) {
+      throw StateError('Player disposed');
+    }
+    final revision = ++_subtitleRevision;
+    if (track.id == 'no' || track.id == 'auto') {
+      _subtitles = null;
+      _updateSubtitle();
+      return;
+    }
+    final id = track.id;
+    final content = id.startsWith('memory://')
+        ? id.substring('memory://'.length)
+        : await File(id.startsWith('file:') ? Uri.parse(id).toFilePath() : id)
+              .readAsString();
+    if (revision != _subtitleRevision || _disposed || _disposing != null) {
+      return;
+    }
+    final subtitles = TextSubtitles.parse(content);
+    _subtitles = subtitles;
+    _updateSubtitle();
   }
 
   @override
@@ -992,6 +1028,8 @@ class OfficialPlayer extends PlatformPlayer {
   }
 
   Future<void> _dispose() async {
+    ++_subtitleRevision;
+    _subtitles = null;
     _onFirstVideoFrame = null;
     _cancelSeek(StateError('Playback disposed during seek'));
     _cancelVideoControl(StateError('Playback disposed during quality switch'));

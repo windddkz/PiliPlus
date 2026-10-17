@@ -1322,40 +1322,42 @@ class VideoDetailController extends GetxController
   late final showVP = true.obs;
   late final viewPointList = <ViewPointSegment>[].obs;
 
+  int _subtitleRequest = 0;
+
   // 设定字幕轨道
   Future<void> setSubtitle(int index) async {
+    final request = ++_subtitleRequest;
+    final player = plPlayerController.videoPlayerController;
+    final videoCid = cid.value;
+    bool current() =>
+        !isClosed &&
+        request == _subtitleRequest &&
+        cid.value == videoCid &&
+        identical(player, plPlayerController.videoPlayerController);
     if (index <= 0) {
-      await plPlayerController.videoPlayerController?.setSubtitleTrack(.no());
-      vttSubtitlesIndex.value = index;
+      await player?.setSubtitleTrack(.no());
+      if (current()) vttSubtitlesIndex.value = index;
       return;
     }
-
-    Future<void> setSub(({bool isData, String id}) subtitle) async {
-      final sub = subtitles[index - 1];
-
-      String subUri = subtitle.id;
-      if (subtitle.isData) {
-        subUri = 'memory://$subUri';
-      }
-      await plPlayerController.videoPlayerController?.setSubtitleTrack(
-        SubtitleTrack(subUri, sub.lanDoc, sub.lan, uri: true),
-      );
-      vttSubtitlesIndex.value = index;
-    }
-
-    var subtitle = vttSubtitles[index - 1];
-    if (subtitle == null) {
-      final result = await VideoHttp.getSubtitles(
-        subtitles[index - 1].subtitleUrl!,
-      );
-      if (!isClosed && result != null) {
+    if (index > subtitles.length) return;
+    final sub = subtitles[index - 1];
+    try {
+      var subtitle = vttSubtitles[index - 1];
+      if (subtitle == null) {
+        final result = await VideoHttp.getSubtitles(sub.subtitleUrl!);
+        if (!current() || result == null) return;
         subtitle = (isData: true, id: result);
         vttSubtitles[index - 1] = subtitle;
-      } else {
-        return;
       }
+      if (!current()) return;
+      final uri = subtitle.isData ? 'memory://${subtitle.id}' : subtitle.id;
+      await player?.setSubtitleTrack(
+        SubtitleTrack(uri, sub.lanDoc, sub.lan, uri: true),
+      );
+      if (current()) vttSubtitlesIndex.value = index;
+    } catch (_) {
+      if (current()) SmartDialog.showToast('字幕加载失败，请尝试 VTT 或 SRT 字幕');
     }
-    await setSub(subtitle);
   }
 
   // interactive video
@@ -1389,6 +1391,7 @@ class VideoDetailController extends GetxController
   late bool continuePlayingPart = Pref.continuePlayingPart;
 
   Future<void> _queryPlayInfo() async {
+    ++_subtitleRequest;
     vttSubtitles.clear();
     vttSubtitlesIndex.value = 0;
     if (plPlayerController.showViewPoints) {
@@ -1542,6 +1545,7 @@ class VideoDetailController extends GetxController
       ?..removeListener(_animListener)
       ..dispose();
     subtitles.clear();
+    ++_subtitleRequest;
     vttSubtitles.clear();
     super.onClose();
   }
@@ -1566,6 +1570,7 @@ class VideoDetailController extends GetxController
     // subtitle
     subtitles.clear();
     vttSubtitlesIndex.value = -1;
+    ++_subtitleRequest;
     vttSubtitles.clear();
 
     // sponsor block
