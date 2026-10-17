@@ -11,6 +11,9 @@ class OfficialPlayer extends PlatformPlayer {
   static bool supportsRate(double rate) =>
       rate.isFinite && rate >= .25 && rate <= 4;
 
+  final _rateUpdates = StreamController<double>.broadcast();
+  Stream<double> get rateUpdates => _rateUpdates.stream;
+
   OfficialPlayer._(this.fallback)
     : super(configuration: const PlayerConfiguration());
 
@@ -436,7 +439,11 @@ class OfficialPlayer extends PlatformPlayer {
         final playing = event['playing'] == true;
         final playingChanged = state.playing != playing;
         state.playing = playing;
-        state.rate = (event['speed'] as num).toDouble();
+        final rate = (event['speed'] as num).toDouble();
+        // Native uses float32; round-trip noise must not turn 1.3x into a long decimal in the UI.
+        final rateChanged = (rate - state.rate).abs() > 1e-6;
+        state.rate = rate;
+        if (rateChanged) _rateUpdates.add(rate);
         state.width = (event['width'] as num).toInt();
         state.height = (event['height'] as num).toInt();
         state.buffer = Duration(
@@ -655,13 +662,18 @@ class OfficialPlayer extends PlatformPlayer {
   @override
   Future<ui.Image?> screenshot() async => (await fallback('视频截图')).screenshot();
 
-  Future<void> _closeStreams() => super.dispose();
+  Future<void> _closeStreams() async {
+    await _rateUpdates.close();
+    await super.dispose();
+  }
+
   @override
   Future<void> dispose() {
     if (_disposing case final pending?) return pending;
     _stoppingPlayers.add(this);
     final disposal = _disposing = _dispose()
         .then((_) async {
+          await _rateUpdates.close();
           await super.dispose();
           _stoppingPlayers.remove(this);
         })

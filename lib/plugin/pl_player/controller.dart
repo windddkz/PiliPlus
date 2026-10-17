@@ -1415,6 +1415,16 @@ class PlPlayerController
     assert(_subscriptions == null);
     final stream = player.stream;
     _subscriptions = [
+      if (player is OfficialPlayer)
+        player.rateUpdates.listen((rate) {
+          if (!identical(player, _videoPlayerController) ||
+              player.state.rate != rate ||
+              rate == playbackSpeed) {
+            return;
+          }
+          _updatePlaybackSpeed(rate);
+        }),
+
       /// playing
       stream.playing.listen((bool playing) {
         if (playing) {
@@ -1655,7 +1665,7 @@ class PlPlayerController
     if (player == null) return false;
     if (!supportsPlaybackSpeed(speed)) {
       SmartDialog.showToast(
-        player is OfficialPlayer ? '官方内核当前支持 0.25～4 倍速' : '倍速必须是大于 0 的有效数值',
+        player is OfficialPlayer ? '倍速应在 0.25～4 之间' : '倍速必须是大于 0 的有效数值',
       );
       return false;
     }
@@ -1666,6 +1676,11 @@ class PlPlayerController
       return false;
     }
     if (!identical(player, _videoPlayerController)) return false;
+    _updatePlaybackSpeed(speed);
+    return true;
+  }
+
+  void _updatePlaybackSpeed(double speed) {
     if (!isLive) _playbackSpeed.value = speed;
     _updatePlaybackState();
     if (danmakuController != null) {
@@ -1678,7 +1693,6 @@ class PlPlayerController
         );
       } catch (_) {}
     }
-    return true;
   }
 
   /// 播放视频

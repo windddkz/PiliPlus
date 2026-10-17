@@ -984,7 +984,58 @@ void main() {
   );
 
   test(
-    'rate capability matches native commands and failed rates retain state',
+    'native rate corrections reach paused clients and repeated requests',
+    () async {
+      final player = await create();
+      final opening = open(player);
+      await Future<void>.delayed(Duration.zero);
+      await emit({'event': 'prepared'});
+      await opening;
+      final rates = <double>[];
+      final closed = Completer<void>();
+      final subscription = player.rateUpdates.listen(
+        rates.add,
+        onDone: closed.complete,
+      );
+      const nativeState = <String, Object?>{
+        'event': 'state',
+        'position': 2000,
+        'duration': 30000,
+        'playing': false,
+        'speed': 3.0,
+        'width': 640,
+        'height': 360,
+        'bufferedPercent': 80,
+      };
+      await player.setRate(4);
+      await emit(nativeState);
+      await emit(nativeState);
+      expect(player.state.rate, 3);
+      expect(rates, [3]);
+      await emit({...nativeState, 'load': 0, 'speed': 2});
+      await emit({...nativeState, 'session': 99, 'speed': 2});
+      expect(player.state.rate, 3);
+      expect(rates, [3]);
+      // A second request must be corrected even if the native rate stayed 3x.
+      await player.setRate(4);
+      await emit(nativeState);
+      expect(rates, [3, 3]);
+      await emit({...nativeState, 'speed': 1.0});
+      expect(rates, [3, 3, 1]);
+      await player.setRate(1.3);
+      await emit({...nativeState, 'speed': 1.2999999523162842});
+      expect(player.state.rate, 1.2999999523162842);
+      expect(rates, [3, 3, 1]);
+      await emit({...nativeState, 'speed': 2.0});
+      expect(rates, [3, 3, 1, 2]);
+      await player.dispose();
+      await closed.future;
+      await subscription.cancel();
+    },
+  );
+
+  test(
+    'rate request bounds and command failures retain valid state',
     () async {
       final player = await create();
       for (final rate in [.25, .5, 1.25, 1.5, 1.75, 2.0, 3.0, 4.0]) {
