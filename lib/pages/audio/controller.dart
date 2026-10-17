@@ -562,6 +562,13 @@ class AudioController extends GetxController
   }) async {
     final source = revision ?? ++_sourceRevision;
     try {
+      if (!_currentSource(source)) return;
+      if (player case final OfficialPlayer previous when previous.isPreparing) {
+        // Release before joining the queue that is waiting for this preparation.
+        _removeListeners();
+        player = null;
+        await previous.dispose();
+      }
       await _enqueue(() async {
         if (!_currentSource(source)) return;
         await _initPlayerIfNeeded();

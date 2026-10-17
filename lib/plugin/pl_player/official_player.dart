@@ -36,6 +36,7 @@ class OfficialPlayer extends PlatformPlayer {
   static bool isResourceFailure(Object error) =>
       error is PlatformException && error.code == 'resource_unavailable';
   Completer<void>? _preparing;
+  bool get isPreparing => _preparing != null;
   bool _nativePrepared = false;
   bool resourceUnavailable = false;
   bool initialSeekTimedOut = false;
