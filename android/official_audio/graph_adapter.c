@@ -117,6 +117,14 @@ fail:
     lp_error=rc<0?rc:AVERROR(EINVAL);if(fresh)release_frame(fresh);lp_frame_free(&frame);return NULL;
 }
 static SourceResult adapted(void *context){
+    // EOF/accurate-seek completion can leave the cached buffering flag set after the last packet hook.
+    void *listener=FIELD(context,0x30,void *);
+    if(listener&&FIELD(FIELD(listener,0,uintptr_t),0x70,uintptr_t)==base+0x13b168){
+        void *checker=FIELD(listener,0x10,void *);
+        if(checker&&FIELD(FIELD(checker,0,uintptr_t),0x70,uintptr_t)==base+0x139d80&&
+           ((int (*)(void *))(base+0x139d80))(checker))
+            ((int (*)(void *))(base+0x139d88))(checker);
+    }
     SourceResult result=original(context);
     pthread_mutex_lock(&lp_lock);pthread_mutex_lock(&lock);reads++;source_tid=gettid();
     void *old=result.frame;
@@ -236,6 +244,9 @@ JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_startGraphAdapter(J
     matches=0;base=0;dl_iterate_phdr(locate,NULL);
     if(matches!=1||*(uint64_t *)(base+0x159d70)!=UINT64_C(0xa9026ffed101c3ff)||*(uint64_t *)(base+0x191e18)!=UINT64_C(0xa9077bfdd10343ff)){fail(env,"Original source/factory ABI mismatch");return;}
     if(!player_instructions_ready()){fail(env,"Prepared player image unavailable");return;}
+    if(*(uint64_t *)(base+0x13b168)!=UINT64_C(0xf9400008f9400800)||
+       *(uint64_t *)(base+0x139d80)!=UINT64_C(0xd65f03c039404000)||
+       *(uint64_t *)(base+0x139d88)!=UINT64_C(0xf9001bfed10243ff)){fail(env,"Original buffering ABI mismatch");return;}
     if(*(uint64_t *)(base+0x196854)!=UINT64_C(0xa9014ff4f81e0ffe)||
        *(ptrdiff_t *)(base+0x2bbdf8)!=0x28||
        *(uintptr_t *)(base+0x2bbe20)!=base+0x1a6808||
