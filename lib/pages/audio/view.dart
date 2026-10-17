@@ -1,3 +1,5 @@
+import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
+
 import 'dart:math' show min;
 
 import 'package:PiliPlus/common/assets.dart';
@@ -60,6 +62,7 @@ class AudioPage extends StatefulWidget {
     String? heroTag,
     Duration? start,
     String? audioUrl,
+    DashTrack? audioTrack,
     http_model.Volume? volume,
     int? extraId,
   }) => Get.toNamed(
@@ -73,6 +76,7 @@ class AudioPage extends StatefulWidget {
       'heroTag': ?heroTag,
       'start': ?start,
       'audioUrl': ?audioUrl,
+      'audioTrack': ?audioTrack,
       'volume': ?volume,
       'extraId': ?extraId,
     },

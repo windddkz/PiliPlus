@@ -257,6 +257,8 @@ final class OfficialRuntime {
         stage("validate");
         String source=request.getString("source"),audio=request.getString("audio");
         if(source==null||(!source.startsWith("/")&&!source.startsWith("https://")&&!source.startsWith("http://")))throw new IllegalArgumentException("Unsupported source");
+        OfficialStream sourceTrack=streamInfo(request.getBundle("sourceTrack"),source);
+        OfficialStream audioTrack=streamInfo(request.getBundle("audioTrack"),audio);
         String userAgent=request.getString("userAgent","PiliPlus"),referer=request.getString("referer","https://www.bilibili.com/");
         for(String header:new String[]{userAgent,referer})if(header.length()>4096||header.contains("\r")||header.contains("\n"))throw new IllegalArgumentException("Invalid source header");
         float rate=request.getFloat("speed",1),gain=request.getFloat("volume",1);long position=request.getLong("position",0);
@@ -300,10 +302,12 @@ final class OfficialRuntime {
                 DashSource sound=DashSource.probe(audio,userAgent,referer);
                 if(!Arrays.asList("H264","HEVC","AV1").contains(video.codec)||!Arrays.asList("AAC","FLAC","AC3","EAC3").contains(sound.codec))throw new IllegalArgumentException("DASH track types do not match");
                 Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField(source.startsWith("/")?"OFFLINE":"VOD").get(null);
-                asset=construct("com.bilibili.ijk.media.MediaAsset$Dash",30280,80,Collections.singletonList(dashStream(video,0,80)),Collections.singletonList(dashStream(sound,1,30280)),scheme,options,null);
+                // Local or manually supplied tracks retain opaque adapter IDs when metadata is unavailable.
+                int videoId=sourceTrack==null?80:sourceTrack.id,audioId=audioTrack==null?30280:audioTrack.id;
+                asset=construct("com.bilibili.ijk.media.MediaAsset$Dash",audioId,videoId,Collections.singletonList(dashStream(video,0,videoId,sourceTrack)),Collections.singletonList(dashStream(sound,1,audioId,audioTrack)),scheme,options,null);
             } else {
                 Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField("NORMAL").get(null);
-                asset=construct("com.bilibili.ijk.media.MediaAsset$Normal",source,Collections.emptyList(),scheme,options,null);
+                asset=construct("com.bilibili.ijk.media.MediaAsset$Normal",source,sourceTrack==null?Collections.emptyList():sourceTrack.backups,scheme,options,null);
             }
             if(!audioOnly&&surface!=null&&!directHdr) {
                 invoke(cls("tv.danmaku.ijk.media.player.render.core.BiliRenderContext"),"init",context);
@@ -344,9 +348,12 @@ final class OfficialRuntime {
             worker.postDelayed(()->run(token,()->{if(!prepared)throw new IOException("Preparation timeout");}),20000);
         } catch(Exception | LinkageError error) {try{release();}catch(Exception | LinkageError cleanup){error.addSuppressed(cleanup);}throw error;}
     }
-    private Object dashStream(DashSource source,int mediaType,int qn) throws Exception {
+    private static OfficialStream streamInfo(Bundle info,String source) {
+        return info==null?null:new OfficialStream(source,info.get("source"),info.get("id"),info.get("bandwidth"),info.get("backups"));
+    }
+    private Object dashStream(DashSource source,int mediaType,int qn,OfficialStream track) throws Exception {
         Object codec=cls("com.bilibili.ijk.media.CodecID").getField(source.codec).get(null);
-        return construct("com.bilibili.ijk.media.IJKDashStream",mediaType,(Integer)invoke(codec,"getId"),qn,0,source.url,Collections.emptyList());
+        return construct("com.bilibili.ijk.media.IJKDashStream",mediaType,(Integer)invoke(codec,"getId"),qn,track==null?0:track.bandwidth,source.url,track==null?Collections.emptyList():track.backups);
     }
     private void applyRoute() throws Exception {
         if(route.endpoint()!=appliedEndpoint&&prepared) {

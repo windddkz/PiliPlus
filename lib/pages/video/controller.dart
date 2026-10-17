@@ -135,6 +135,8 @@ class VideoDetailController extends GetxController
   late VideoItem firstVideo;
   String? videoUrl;
   String? audioUrl;
+  DashTrack? _videoTrack;
+  DashTrack? _audioTrack;
   Duration? defaultST;
   Duration? playedTime;
   String playedTimePos(bool hasParams) {
@@ -698,6 +700,14 @@ class VideoDetailController extends GetxController
 
     firstVideo = findVideoByQa(currentVideoQa.code, setCodecs: true);
     videoUrl = VideoUtils.getCdnUrl(firstVideo.playUrls);
+    _videoTrack = DashTrack(
+      source: videoUrl!,
+      id: firstVideo.id,
+      bandwidth: firstVideo.bandWidth,
+      urls: firstVideo.playUrls,
+    );
+
+    _audioTrack = null;
 
     /// 根据currentAudioQa 重新设置audioUrl
     if (currentAudioQa != null) {
@@ -706,6 +716,12 @@ class VideoDetailController extends GetxController
         orElse: () => data.dash!.audio!.first,
       );
       audioUrl = VideoUtils.getCdnUrl(firstAudio.playUrls, isAudio: true);
+      _audioTrack = DashTrack(
+        source: audioUrl!,
+        id: firstAudio.id,
+        bandwidth: firstAudio.bandWidth,
+        urls: firstAudio.playUrls,
+      );
     }
 
     playerInit();
@@ -742,6 +758,8 @@ class VideoDetailController extends GetxController
           : NetworkSource(
               videoSource: videoUrl!,
               audioSource: audioUrl,
+              videoTrack: _videoTrack,
+              audioTrack: _audioTrack,
             ),
       seekTo: seek,
       duration: data.timeLength == null
@@ -984,8 +1002,15 @@ class VideoDetailController extends GetxController
       _setVideoHeight();
 
       videoUrl = VideoUtils.getCdnUrl(firstVideo.playUrls);
+      _videoTrack = DashTrack(
+        source: videoUrl!,
+        id: firstVideo.id,
+        bandwidth: firstVideo.bandWidth,
+        urls: firstVideo.playUrls,
+      );
 
       /// 优先顺序 设置中指定质量 -> 当前可选的最高质量
+      _audioTrack = null;
       AudioItem? firstAudio;
       final audioList = data.dash?.audio;
       if (audioList != null && audioList.isNotEmpty) {
@@ -1003,6 +1028,12 @@ class VideoDetailController extends GetxController
           orElse: () => audioList.first,
         );
         audioUrl = VideoUtils.getCdnUrl(firstAudio.playUrls, isAudio: true);
+        _audioTrack = DashTrack(
+          source: audioUrl!,
+          id: firstAudio.id,
+          bandwidth: firstAudio.bandWidth,
+          urls: firstAudio.playUrls,
+        );
         currentAudioQa = AudioQuality.fromCode(firstAudio.id);
       } else {
         audioUrl = '';
@@ -1295,6 +1326,8 @@ class VideoDetailController extends GetxController
     defaultST = null;
     videoUrl = null;
     audioUrl = null;
+    _videoTrack = null;
+    _audioTrack = null;
     volume = null;
 
     // danmaku
@@ -1450,6 +1483,7 @@ class VideoDetailController extends GetxController
       heroTag: _autoPlay.value ? heroTag : null,
       start: playedTime,
       audioUrl: audioUrl,
+      audioTrack: _audioTrack,
       volume: volume,
       extraId: extraId,
     );

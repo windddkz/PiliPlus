@@ -198,6 +198,13 @@ class OfficialPlayer extends PlatformPlayer {
             ? source.audioSource
             : source.videoSource,
         if (!audioOnly) 'audio': source.audioSource,
+        if (source is NetworkSource) ...{
+          'sourceTrack': audioOnly && source.audioSource != null
+              ? source.audioTrack?.forSource(source.audioSource)
+              : source.videoTrack?.forSource(source.videoSource),
+          if (!audioOnly)
+            'audioTrack': source.audioTrack?.forSource(source.audioSource),
+        },
         'position': position?.inMilliseconds ?? 0,
         'speed': state.rate,
         'volume': _outputVolume(state.volume),

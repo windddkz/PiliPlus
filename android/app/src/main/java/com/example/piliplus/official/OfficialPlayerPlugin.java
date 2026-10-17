@@ -201,6 +201,16 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                 for (String key : new String[]{"source", "audio", "userAgent", "referer"}) {
                     String value = call.argument(key); if (value != null) data.putString(key, value);
                 }
+                for(String key:new String[]{"sourceTrack","audioTrack"}) {
+                    Object raw=call.argument(key);if(raw==null)continue;
+                    if(!(raw instanceof Map<?,?>))throw new IllegalArgumentException("Invalid stream metadata");
+                    Map<?,?> fields=(Map<?,?>)raw;
+                    OfficialStream track=new OfficialStream(data.getString(key.equals("sourceTrack")?"source":"audio"),
+                        fields.get("source"),fields.get("id"),fields.get("bandwidth"),fields.get("backups"));
+                    Bundle info=new Bundle();info.putString("source",track.source);info.putInt("id",track.id);
+                    info.putInt("bandwidth",track.bandwidth);info.putStringArrayList("backups",new ArrayList<>(track.backups));
+                    data.putBundle(key,info);
+                }
                 data.putLong("position", number(call, "position", 0).longValue());
                 data.putLong("load", number(call, "load", 1).longValue());
                 data.putFloat("speed", number(call, "speed", 1).floatValue());

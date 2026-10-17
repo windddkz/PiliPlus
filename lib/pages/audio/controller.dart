@@ -110,6 +110,7 @@ class AudioController extends GetxController
   bool _forceMpv = false;
   String? _officialFallbackReason;
   String? _sourceUrl;
+  DashTrack? _sourceTrack;
   String _sourceUa = Constants.userAgentApp;
   String? _sourceReferer;
   http_model.Volume? _sourceVolume;
@@ -262,6 +263,7 @@ class AudioController extends GetxController
       _querySponsorBlock();
       _onOpenMedia(
         audioUrl,
+        track: args['audioTrack'] as DashTrack?,
         ua: BrowserUa.pc,
         referer: HttpString.baseUrl,
         volume:
@@ -443,8 +445,15 @@ class AudioController extends GetxController
           (e) => e.id <= cacheAudioQa,
           (a, b) => a.id > b.id ? a : b,
         );
+        final url = VideoUtils.getCdnUrl(audio.playUrls);
         await _onOpenMedia(
-          VideoUtils.getCdnUrl(audio.playUrls),
+          url,
+          track: DashTrack(
+            source: url,
+            id: audio.id,
+            bandwidth: audio.bandwidth,
+            urls: audio.playUrls,
+          ),
           volume: volume,
           revision: revision,
         );
@@ -467,6 +476,7 @@ class AudioController extends GetxController
 
   Future<void> _onOpenMedia(
     String url, {
+    DashTrack? track,
     String ua = Constants.userAgentApp,
     String? referer,
     http_model.Volume? volume,
@@ -479,6 +489,7 @@ class AudioController extends GetxController
         await _initPlayerIfNeeded();
         if (!_currentSource(source) || player == null) return;
         _sourceUrl = url;
+        _sourceTrack = track;
         _sourceUa = ua;
         _sourceReferer = referer;
         _sourceVolume = volume;
@@ -507,7 +518,11 @@ class AudioController extends GetxController
     final current = player!;
     if (current is OfficialPlayer) {
       await current.openSource(
-        NetworkSource(videoSource: _sourceUrl!, audioSource: null),
+        NetworkSource(
+          videoSource: _sourceUrl!,
+          audioSource: null,
+          videoTrack: _sourceTrack,
+        ),
         position: start,
         userAgent: _sourceUa,
         referer: _sourceReferer ?? '',

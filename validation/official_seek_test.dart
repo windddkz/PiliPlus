@@ -58,6 +58,103 @@ void main() {
     return p;
   }
 
+  test('selected stream metadata follows video and audio-only opens', () async {
+    final p = await OfficialPlayer.create((_) => throw StateError('fallback'));
+    final source = NetworkSource(
+      videoSource: 'https://selected.example/video',
+      audioSource: 'https://selected.example/audio',
+      videoTrack: DashTrack(
+        source: 'https://selected.example/video',
+        id: 126,
+        bandwidth: 8000000,
+        urls: ['https://original.example/video'],
+      ),
+      audioTrack: DashTrack(
+        source: 'https://selected.example/audio',
+        id: 30251,
+        bandwidth: 2000000,
+        urls: ['https://original.example/audio'],
+      ),
+    );
+    final video = p.openSource(
+      source,
+      userAgent: 'test',
+      referer: '',
+      audioOnly: false,
+    );
+    await emit({'event': 'prepared'});
+    await video;
+    final first = calls.lastWhere((c) => c.method == 'open').arguments as Map;
+    expect((first['sourceTrack'] as Map)['id'], 126);
+    expect((first['sourceTrack'] as Map)['bandwidth'], 8000000);
+    expect((first['audioTrack'] as Map)['id'], 30251);
+    expect((first['sourceTrack'] as Map)['backups'], [
+      'https://original.example/video',
+    ]);
+    final audio = p.openSource(
+      source,
+      userAgent: 'test',
+      referer: '',
+      audioOnly: true,
+    );
+    await emit({'event': 'prepared', 'load': 2});
+    await audio;
+    final second = calls.lastWhere((c) => c.method == 'open').arguments as Map;
+    expect(second['source'], source.audioSource);
+    expect((second['sourceTrack'] as Map)['id'], 30251);
+    expect(second.containsKey('audioTrack'), false);
+    await p.dispose();
+  });
+  test('manual source changes discard stale stream metadata', () async {
+    final p = await OfficialPlayer.create((_) => throw StateError('fallback'));
+    final source = NetworkSource(
+      videoSource: 'https://edited.example/new',
+      audioSource: null,
+      videoTrack: DashTrack(
+        source: 'https://old.example/video',
+        id: 80,
+        bandwidth: 1000,
+        urls: ['https://old.example/backup'],
+      ),
+    );
+    final opening = p.openSource(
+      source,
+      userAgent: 'test',
+      referer: '',
+      audioOnly: false,
+    );
+    await emit({'event': 'prepared'});
+    await opening;
+    final args = calls.lastWhere((c) => c.method == 'open').arguments as Map;
+    expect(args['sourceTrack'], isNull);
+    expect(args['audioTrack'], isNull);
+    await p.dispose();
+  });
+  test(
+    'stream alternatives snapshot, deduplicate and exclude unusable URLs',
+    () {
+      final urls = [
+        'https://chosen.example/a',
+        'https://backup.example/a',
+        'https://backup.example/a',
+        '',
+        'file:///local',
+        'https://user:secret@example/a',
+      ];
+      final track = DashTrack(
+        source: urls.first,
+        id: 30251,
+        bandwidth: -1,
+        urls: urls,
+      );
+      urls.clear();
+      final info = track.forSource('https://chosen.example/a')!;
+      expect(info['bandwidth'], 0);
+      expect(info['backups'], ['https://backup.example/a']);
+      expect(track.forSource('https://chosen.example/different'), isNull);
+    },
+  );
+
   Iterable<MethodCall> seeks() => calls.where((c) => c.method == 'seek');
   setUp(() {
     calls.clear();
