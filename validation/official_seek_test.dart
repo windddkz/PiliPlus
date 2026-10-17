@@ -28,9 +28,11 @@ void main() {
     int actual, {
     bool timeout = false,
     int load = 1,
+    int duration = 0,
   }) => emit({
     'event': 'seek_complete',
     'target': target,
+    'duration': duration,
     'position': actual,
     'accurate': true,
     'timedOut': timeout,
@@ -92,6 +94,54 @@ void main() {
       await p.dispose();
     },
   );
+  for (final initial in [false, true]) {
+    test(
+      'clamped end target completes ${initial ? 'initial' : 'ordinary'} seek',
+      () async {
+        final p = initial
+            ? await OfficialPlayer.create(
+                (_) => throw StateError('Unexpected fallback'),
+              )
+            : await prepared();
+        bool done = false;
+        final pending =
+            (initial
+                    ? open(p, position: 35000)
+                    : p.seek(const Duration(seconds: 35)))
+                .then<void>((_) => done = true, onError: (Object _) {});
+        try {
+          if (initial) await emit({'event': 'prepared'});
+          await Future<void>.delayed(Duration.zero);
+          await result(30000, 30000, duration: 30000);
+          expect(done, true);
+          expect(p.state.position.inMilliseconds, 30000);
+        } finally {
+          await p.dispose();
+          await pending;
+        }
+      },
+    );
+  }
+  test('unknown duration does not clamp the requested target', () async {
+    final p = await prepared();
+    final pending = p.seek(const Duration(seconds: 5));
+    await Future<void>.delayed(Duration.zero);
+    await result(5000, 5000, duration: -1);
+    await pending;
+    expect(p.state.position.inMilliseconds, 5000);
+    await p.dispose();
+  });
+  test('duration cannot make an unrelated in-range target match', () async {
+    final p = await prepared();
+    bool done = false;
+    final pending = p.seek(const Duration(seconds: 5)).then((_) => done = true);
+    await Future<void>.delayed(Duration.zero);
+    await result(30000, 30000, duration: 30000);
+    expect(done, false);
+    await result(5000, 5000, duration: 30000);
+    await pending;
+    await p.dispose();
+  });
   test('native timeout is nonfatal and next seek can succeed', () async {
     final p = await prepared();
     final errors = <String>[];

@@ -38,7 +38,7 @@ static int lp_open(void){
  if(lp_lib)return -1;
  lp_lib=dlopen("libijkffmpeg.so",RTLD_NOW|RTLD_LOCAL);if(!lp_lib)return -1;
  unsigned (*version)(void)=dlsym(lp_lib,"avutil_version");
- if(!version||version()!=0x3b2764||dlsym(lp_lib,"avcodec_find_decoder")!=*(void **)(base+0x2ca5f8))goto fail;
+ if(!version||version()!=0x3b2764||dlsym(lp_lib,"avcodec_find_decoder")!=*(void **)(base+0x2ca600))goto fail;
  #define RESOLVE(name,symbol) do {name=dlsym(lp_lib,symbol);if(!name)goto fail;}while(0)
  RESOLVE(lp_alloc,"avfilter_graph_alloc");RESOLVE(lp_free,"avfilter_graph_free");RESOLVE(lp_find,"avfilter_get_by_name");
  RESOLVE(lp_create,"avfilter_graph_create_filter");RESOLVE(lp_link,"avfilter_link");RESOLVE(lp_config,"avfilter_graph_config");

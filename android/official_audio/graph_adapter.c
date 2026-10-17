@@ -40,11 +40,11 @@ static int locate(struct dl_phdr_info *info,size_t size,void *data){
 }
 static void retain_frame(void *frame){
     uintptr_t v=FIELD(frame,0,uintptr_t);ptrdiff_t offset=*(ptrdiff_t *)(v-24);
-    ((Ref)(base+0x1f369c))((char *)frame+offset,frame);
+    ((Ref)(base+0x1f3848))((char *)frame+offset,frame);
 }
 static void release_frame(void *frame){
     uintptr_t v=FIELD(frame,0,uintptr_t);ptrdiff_t offset=*(ptrdiff_t *)(v-24);
-    ((Ref)(base+0x1f3730))((char *)frame+offset,frame);
+    ((Ref)(base+0x1f38dc))((char *)frame+offset,frame);
 }
 static void *buffer_data(void *frame,size_t bytes){
     void *b=FIELD(frame,0x70,void *);if(!b)return NULL;
@@ -57,7 +57,7 @@ static int copy_side_data(void *fresh,void *old){
     uintptr_t begin=FIELD(old,0xb8,uintptr_t),end=FIELD(old,0xc0,uintptr_t),cap=FIELD(old,0xc8,uintptr_t);
     if(begin>end||end>cap||(end-begin)%56||(end-begin)/56>4096)return -1;
     size_t count=(end-begin)/56;
-    if(count)((void (*)(void *,uintptr_t,uintptr_t,size_t))(base+0x1a9cb0))((char *)fresh+0xb8,begin,end,count);
+    if(count)((void (*)(void *,uintptr_t,uintptr_t,size_t))(base+0x1a9ea0))((char *)fresh+0xb8,begin,end,count);
     return (FIELD(fresh,0xc0,uintptr_t)-FIELD(fresh,0xb8,uintptr_t))/56==count?(int)count:-1;
 }
 #include "loudnorm_graph.h"
@@ -81,7 +81,7 @@ static void flush_adapted(void *context){
 static int replace_decoder(int install){
  uintptr_t old[2]={(uintptr_t)receive_original,(uintptr_t)flush_original};
  uintptr_t next[2]={(uintptr_t)receive_adapted,(uintptr_t)flush_adapted};
- return patch_pair((uintptr_t *)(base+0x2ca638),(uintptr_t *)(base+0x2ca828),install?old:next,install?next:old,mprotect);
+ return patch_pair((uintptr_t *)(base+0x2ca640),(uintptr_t *)(base+0x2ca830),install?old:next,install?next:old,mprotect);
 }
 static void *filter_source_frame(void *old,void *context){
     AVFrame *frame=lp_frame_alloc();void *stream=NULL,*fresh=NULL;
@@ -89,13 +89,13 @@ static void *filter_source_frame(void *old,void *context){
     uint64_t layout=FIELD(old,0x68,uint64_t);
     if(!frame||count<=0||count>262144||channels<=0||channels>8||rate<=0||rate>384000||!layout||
        FIELD(old,0x80,uintptr_t)||FIELD(old,0xd0,uintptr_t)||FIELD(old,0x100,uintptr_t))goto fail;
-    rc=((int (*)(void **,void *,AVFrame *))(base+0x1a9878))(&stream,old,frame);if(rc)goto fail;
-    uint64_t av_layout=((uint64_t (*)(uint64_t))(base+0x1b2a40))(layout);
+    rc=((int (*)(void **,void *,AVFrame *))(base+0x1a9a68))(&stream,old,frame);if(rc)goto fail;
+    uint64_t av_layout=((uint64_t (*)(uint64_t))(base+0x1b2c30))(layout);
     if(!av_layout||frame->ch_layout.order!=AV_CHANNEL_ORDER_NATIVE||frame->ch_layout.nb_channels!=channels||
        frame->sample_rate!=rate||frame->nb_samples!=count){rc=AVERROR(EINVAL);goto fail;}
     frame->ch_layout.u.mask=av_layout;
     rc=lp_apply(frame,context);if(rc)goto fail;
-    graph_make_frame(&fresh,4,layout,rate,count,base+0x191be8);if(!fresh){rc=AVERROR(ENOMEM);goto fail;}
+    graph_make_frame(&fresh,4,layout,rate,count,base+0x191e18);if(!fresh){rc=AVERROR(ENOMEM);goto fail;}
     size_t bytes=(size_t)count*(size_t)channels*sizeof(float);void *pcm=buffer_data(fresh,bytes);
     if(!pcm||frame->linesize[0]<(int)(bytes*2)||copy_side_data(fresh,old)<0){rc=AVERROR(EINVAL);goto fail;}
     // app.in multiplies double samples, then the output graph converts to float.
@@ -120,8 +120,8 @@ again:
            h.kind==previous_header.kind&&h.flags==previous_header.flags&&
            h.switch_serial==previous_header.switch_serial&&h.frames==previous_header.frames&&
            h.pts==previous_header.pts&&h.serial==previous_header.serial&&h.queue_serial==previous_header.queue_serial&&
-           ((int (*)(void *))(base+0x15abd0))(context)==h.queue_serial&&
-           ((int (*)(void *))(base+0x15ac58))(context)){
+           ((int (*)(void *))(base+0x15ae00))(context)==h.queue_serial&&
+           ((int (*)(void *))(base+0x15ae88))(context)){
             release_frame(old);release_frame(previous_frame);previous_frame=NULL;
             duplicate_eof_frames++;
             result=original(context);reads++;old=result.frame;goto again;
@@ -153,7 +153,7 @@ again:
         if(count<=0||count>262144||channels<=0||channels>8||rate<=0||rate>384000||!layout){errors++;release_frame(old);result.frame=NULL;result.status=AVERROR(EINVAL);goto done;}
         size_t n=(size_t)count*(size_t)channels,bytes=n*4;
         const int32_t *in=buffer_data(old,bytes);if(!in){errors++;release_frame(old);result.frame=NULL;result.status=AVERROR(EINVAL);goto done;}
-        void *fresh=NULL;graph_make_frame(&fresh,4,layout,rate,count,base+0x191be8);
+        void *fresh=NULL;graph_make_frame(&fresh,4,layout,rate,count,base+0x191e18);
         if(!fresh){errors++;release_frame(old);result.frame=NULL;result.status=AVERROR(EINVAL);goto done;}
         float *out=buffer_data(fresh,bytes);
         if(!out||FIELD(fresh,0x60,int)!=channels){release_frame(fresh);errors++;release_frame(old);result.frame=NULL;result.status=AVERROR(EINVAL);goto done;}
@@ -178,7 +178,7 @@ done:
     pthread_mutex_unlock(&lock);pthread_mutex_unlock(&lp_lock);return result;
 }
 static int replace(Read expected,Read next){
-    Read *slot=(Read *)(base+0x2b7750);
+    Read *slot=(Read *)(base+0x2b7788);
     if(__atomic_load_n(slot,__ATOMIC_ACQUIRE)!=expected)return -1;
     long page=sysconf(_SC_PAGESIZE);if(page<=0)return -1;
     void *address=(void *)((uintptr_t)slot&~((uintptr_t)page-1));
@@ -206,14 +206,14 @@ JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_startGraphAdapter(J
     if(active||installed){fail(env,"Graph adapter already active");return;}
     if(!isfinite(gain_db)||gain_db < -99||gain_db > 10){fail(env,"Invalid metadata gain");return;}
     matches=0;base=0;dl_iterate_phdr(locate,NULL);
-    if(matches!=1||*(uint64_t *)(base+0x159b40)!=UINT64_C(0xa9026ffed101c3ff)||*(uint64_t *)(base+0x191be8)!=UINT64_C(0xa9077bfdd10343ff)){fail(env,"Original source/factory ABI mismatch");return;}
+    if(matches!=1||*(uint64_t *)(base+0x159d70)!=UINT64_C(0xa9026ffed101c3ff)||*(uint64_t *)(base+0x191e18)!=UINT64_C(0xa9077bfdd10343ff)){fail(env,"Original source/factory ABI mismatch");return;}
     if(!player_instructions_ready()){fail(env,"Prepared player image unavailable");return;}
     if(prefill){fail(env,"Startup prefill requires a separate player image");return;}
     if(lp_open()){fail(env,"Locked filter runtime unavailable");return;}
     receive_original=dlsym(lp_lib,"avcodec_receive_frame");flush_original=dlsym(lp_lib,"avcodec_flush_buffers");
     if(!receive_original||!flush_original){lp_close();fail(env,"Decoder APIs unavailable");return;}
     lp_profile=loudness_enabled?1:0;lp_metadata_gain_db=gain_db;clock_diagnostics=diagnostics;video_trace_enabled=video_diagnostics;
-    original=(Read)(base+0x159b40);enabled=trim_eof=1;errors=0;
+    original=(Read)(base+0x159d70);enabled=trim_eof=1;errors=0;
     filter_tid=source_tid=0;filter_total_ns=filter_max_ns=filter_over_40ms=0;
     duplicate_eof_frames=side_data_frames=side_data_records=0;max_channels=last_rate=last_channels=0;
     memset(formats,0,sizeof(formats));previous_frame=previous_context=NULL;memset(&previous_header,0,sizeof(previous_header));

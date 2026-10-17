@@ -72,11 +72,11 @@ final class OfficialRuntime {
     // Android rejects restoring execute permission after modifying a file-backed code page.
     static File playerImage(File directory) throws Exception {
         byte[] bytes=Files.readAllBytes(new File(directory,"libijk.so").toPath());
-        if(!hash(bytes).equals("736c915b4f19b038dec75b10da42e683300ec9c99e7710cc934237b2153b0a9b"))
+        if(!hash(bytes).equals("d3971ffa09006581cf612f4d803fc8fd1677fe687f3712ae6d64953e55db5bc2"))
             throw new SecurityException("Unexpected player image");
         ByteBuffer code=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
-        int[][] changes={{0x14875c,0x97fffb92,0xd503201f},{0x1a91d4,0x1b0a7d29,0x9b0a7d29},
-            {0x1a91d8,0x1ac80928,0x9ac80928},{0x18b258,0x540000ab,0xd503201f}};
+        int[][] changes={{0x14898c,0x97fffb92,0xd503201f},{0x1a93c4,0x1b0a7d29,0x9b0a7d29},
+            {0x1a93c8,0x1ac80928,0x9ac80928},{0x18b488,0x540000ab,0xd503201f}};
         for(int[] change:changes){
             if(code.getInt(change[0])!=change[1])throw new SecurityException("Player instruction mismatch");
             code.putInt(change[0],change[2]);
@@ -226,6 +226,7 @@ final class OfficialRuntime {
                     case "seek_complete":
                         Bundle seek=new Bundle();seek.putString("event","seek_complete");
                         seek.putLong("position",(Long)args[1]);seek.putLong("target",(Long)args[2]);
+                        seek.putLong("duration",(Long)invoke(player,"getDuration"));
                         seek.putBoolean("accurate",(Boolean)args[3]);seek.putBoolean("timedOut",(Boolean)args[4]);emit(seek);break;
                     case "buffering":
                         Bundle b=new Bundle();b.putString("event","buffering");b.putBoolean("buffering",(Boolean)args[1]);emit(b);break;

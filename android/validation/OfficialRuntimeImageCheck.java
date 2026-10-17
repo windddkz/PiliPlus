@@ -14,8 +14,8 @@ public final class OfficialRuntimeImageCheck {
             File output=OfficialRuntime.playerImage(directory.toFile());
             Path image=output.toPath().resolve("libijk.so");
             byte[] expected=original.clone();ByteBuffer words=ByteBuffer.wrap(expected).order(ByteOrder.LITTLE_ENDIAN);
-            words.putInt(0x14875c,0xd503201f);words.putInt(0x1a91d4,0x9b0a7d29);
-            words.putInt(0x1a91d8,0x9ac80928);words.putInt(0x18b258,0xd503201f);
+            words.putInt(0x14898c,0xd503201f);words.putInt(0x1a93c4,0x9b0a7d29);
+            words.putInt(0x1a93c8,0x9ac80928);words.putInt(0x18b488,0xd503201f);
             assert Arrays.equals(Files.readAllBytes(source),original):"Original changed";
             assert Arrays.equals(Files.readAllBytes(image),expected):"Different from previous in-memory fixes";
             assert Files.getPosixFilePermissions(image).stream().noneMatch(p->p.name().endsWith("WRITE"));

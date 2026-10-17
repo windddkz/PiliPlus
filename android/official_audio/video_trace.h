@@ -15,18 +15,18 @@ static int observed_video_submit(void *self,void *frame){
     if(frame){r.pts=FIELD(frame,0x18,int64_t);r.duration=FIELD(frame,0x30,int64_t);r.width=FIELD(frame,0x54,int);r.height=FIELD(frame,0x58,int);}
     void *child=FIELD(self,0xd0,void *);
     if(child)r.child_method=FIELD(FIELD(child,0,void *),0xb8,uintptr_t)-base;
-    if(r.child_method==0x1c9eb8){r.render_flag=FIELD(child,0x60,unsigned char);r.render_timestamp=FIELD(child,0x68,int64_t);}
-    int result=((int (*)(void *,void *))(base+0x19bca4))(self,frame);r.result=result;record_video(&r);return result;
+    if(r.child_method==0x1ca0a8){r.render_flag=FIELD(child,0x60,unsigned char);r.render_timestamp=FIELD(child,0x68,int64_t);}
+    int result=((int (*)(void *,void *))(base+0x19be94))(self,frame);r.result=result;record_video(&r);return result;
 }
 static void observed_video_update(void *self){
     VideoTraceRow r={.begin=monotonic_ns(),.kind=1};
-    ((void (*)(void *))(base+0x19bb40))(self);record_video(&r);
+    ((void (*)(void *))(base+0x19bd30))(self);record_video(&r);
 }
 static int replace_video_trace(int install){
     if(!video_trace_enabled)return 0;
-    uintptr_t original[2]={base+0x19bca4,base+0x19bb40},next[2]={(uintptr_t)observed_video_submit,(uintptr_t)observed_video_update};
+    uintptr_t original[2]={base+0x19be94,base+0x19bd30},next[2]={(uintptr_t)observed_video_submit,(uintptr_t)observed_video_update};
     if(install){video_count=video_overflow=0;video_submits=video_updates=0;}
-    return patch_pair((uintptr_t *)(base+0x2bb938),(uintptr_t *)(base+0x2bb940),install?original:next,install?next:original,mprotect);
+    return patch_pair((uintptr_t *)(base+0x2bb970),(uintptr_t *)(base+0x2bb978),install?original:next,install?next:original,mprotect);
 }
 static int dump_video_trace(FILE *out){
     if(fputs("begin_ns\tend_ns\tkind\tresult\tpts_us\tduration_us\twidth\theight\tchild_method\ttid\trender_flag\trender_timestamp\n",out)<0)return -1;

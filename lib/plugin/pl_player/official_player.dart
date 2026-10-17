@@ -201,20 +201,28 @@ class OfficialPlayer extends PlatformPlayer {
       case 'seek_complete':
         final target = event['target'];
         final position = event['position'];
+        final duration = event['duration'];
         if (target is! int ||
             position is! int ||
             position < 0 ||
+            duration is! int ||
             event['accurate'] != true ||
             event['timedOut'] is! bool) {
           return;
         }
-        if (target != _initialSeekTarget && target != _seekTarget) return;
+        // The native player reports the duration when a request exceeds EOF.
+        bool matches(int? requested) =>
+            requested != null &&
+            target ==
+                (duration > 0 ? math.min(requested, duration) : requested);
+        final initial = matches(_initialSeekTarget);
+        if (!initial && !matches(_seekTarget)) return;
         state.position = Duration(milliseconds: position);
         positionController.add(state.position);
         final error = event['timedOut'] == true
             ? PlatformException(code: 'official_seek_timeout')
             : null;
-        if (target == _initialSeekTarget) {
+        if (initial) {
           _initialSeekTarget = null;
           if (error != null) {
             if (_preparing case final pending? when !pending.isCompleted) {

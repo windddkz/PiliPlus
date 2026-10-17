@@ -9,7 +9,7 @@ static ClockEstimate observed_estimate(void *state,int64_t first,int64_t second,
     static _Thread_local int64_t last_log;
     int anchored=FIELD(state,0x39,unsigned char);
     int64_t previous=FIELD(state,0x50,int64_t),anchor=FIELD(state,0x40,int64_t),anchor_time=FIELD(state,0x48,int64_t);
-    ClockEstimate out=((EstimateFn)(base+0x18b2c4))(state,first,second,latency,now);
+    ClockEstimate out=((EstimateFn)(base+0x18b4f4))(state,first,second,latency,now);
     if(state!=last_state || now<last_log || now-last_log>=100000 || anchored!=FIELD(state,0x39,unsigned char)){
         __android_log_print(ANDROID_LOG_INFO,"PiliClockEstimate",
             "state=%p caller=%llx now=%lld rate=%d first=%lld second=%lld latency=%lld anchored=%d anchor=%lld anchor_time=%lld previous=%lld out=%lld flags=%u,%u,%u",
@@ -27,21 +27,21 @@ static void corrected_timestamp(void *state,int valid,int64_t frames,int64_t sta
         anchor_time=FIELD(state,0x48,int64_t);previous_errors=FIELD(state,0x70,int64_t);
     }
     if(valid&&frames==0){valid=0;__atomic_add_fetch(&zero_timestamp_rejections,1,__ATOMIC_RELAXED);}
-    ((TimestampFn)(base+0x18b164))(state,valid,frames,stamp,now);
+    ((TimestampFn)(base+0x18b394))(state,valid,frames,stamp,now);
     if(clock_diagnostics)__android_log_print(ANDROID_LOG_INFO,"PiliClockTrace",
         "state=%p valid=%d frames=%lld stamp=%lld now=%lld rate=%d before=%d,%lld,%lld,%lld after=%d,%lld,%lld,%lld last_out=%lld last_stamp_frame=%lld drift_limit=%lld drift_instruction=%08x",
         state,valid,(long long)frames,(long long)stamp,(long long)now,FIELD(state,8,int),
         anchored,(long long)anchor,(long long)anchor_time,(long long)previous_errors,
         FIELD(state,0x39,unsigned char),(long long)FIELD(state,0x40,int64_t),(long long)FIELD(state,0x48,int64_t),(long long)FIELD(state,0x70,int64_t),
-        (long long)FIELD(state,0x50,int64_t),(long long)FIELD(state,0x60,int64_t),(long long)FIELD(state,0x30,int64_t),FIELD((void *)base,0x18b258,uint32_t));
+        (long long)FIELD(state,0x50,int64_t),(long long)FIELD(state,0x60,int64_t),(long long)FIELD(state,0x30,int64_t),FIELD((void *)base,0x18b488,uint32_t));
 }
 static int replace_clock_timestamp(int install){
-    uintptr_t old[2]={base+0x18b164,base+0x18b2c4},next[2]={(uintptr_t)corrected_timestamp,clock_diagnostics?(uintptr_t)observed_estimate:base+0x18b2c4};
-    return patch_pair((uintptr_t *)(base+0x2b9b20),(uintptr_t *)(base+0x2b9b28),install?old:next,install?next:old,mprotect);
+    uintptr_t old[2]={base+0x18b394,base+0x18b4f4},next[2]={(uintptr_t)corrected_timestamp,clock_diagnostics?(uintptr_t)observed_estimate:base+0x18b4f4};
+    return patch_pair((uintptr_t *)(base+0x2b9b58),(uintptr_t *)(base+0x2b9b60),install?old:next,install?next:old,mprotect);
 }
 static int player_instructions_ready(void){
-    return FIELD((void *)base,0x14875c,uint32_t)==0xd503201f &&
-        FIELD((void *)base,0x1a91d4,uint32_t)==0x9b0a7d29 &&
-        FIELD((void *)base,0x1a91d8,uint32_t)==0x9ac80928 &&
-        FIELD((void *)base,0x18b258,uint32_t)==0xd503201f;
+    return FIELD((void *)base,0x14898c,uint32_t)==0xd503201f &&
+        FIELD((void *)base,0x1a93c4,uint32_t)==0x9b0a7d29 &&
+        FIELD((void *)base,0x1a93c8,uint32_t)==0x9ac80928 &&
+        FIELD((void *)base,0x18b488,uint32_t)==0xd503201f;
 }

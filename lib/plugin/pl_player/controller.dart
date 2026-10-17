@@ -150,7 +150,7 @@ class PlPlayerController
       _videoPlayerController is OfficialPlayer && !onlyPlayAudio.value;
 
   String get backendDescription => _videoPlayerController is OfficialPlayer
-      ? '官方 app.in 6.6.0 / IJK 音视频内核（实验）\n${(_videoPlayerController! as OfficialPlayer).audioDescription}\n${(_videoPlayerController! as OfficialPlayer).routeDescription}\n${(_videoPlayerController! as OfficialPlayer).loudnessDescription}'
+      ? '官方国内版 9.14.0 / IJK 音视频内核（实验）\n${(_videoPlayerController! as OfficialPlayer).audioDescription}\n${(_videoPlayerController! as OfficialPlayer).routeDescription}\n${(_videoPlayerController! as OfficialPlayer).loudnessDescription}'
       : _officialFallbackReason == null
       ? 'mpv'
       : 'mpv（回退：$_officialFallbackReason）';

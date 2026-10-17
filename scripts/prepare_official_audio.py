@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Prepare local research assets from the exact original XAPK; no network or JNI merging."""
+"""Prepare local research assets from the locked official APK; no network or JNI merging."""
 import argparse
 import hashlib
-import io
 import json
 from pathlib import Path
 import shutil
@@ -17,15 +16,15 @@ p.add_argument('--fixtures', action='store_true')
 a = p.parse_args()
 manifest_path = repo / 'android/official-runtime-manifest.json'
 manifest = json.loads(manifest_path.read_text())
-xapk_path = a.workspace / 'apks/bilibili-Anime-Video-HD_6.6.0_APKPure.xapk'
-assert hashlib.sha256(xapk_path.read_bytes()).hexdigest() == manifest['xapk_sha256'], 'Wrong official sample'
+apk_path = a.workspace / manifest['apk_path']
+assert hashlib.sha256(apk_path.read_bytes()).hexdigest() == manifest['apk_sha256'], 'Wrong official sample'
 destination = repo / 'android/app/src/officialAudio/assets/official_runtime'
 destination.mkdir(parents=True, exist_ok=True)
-with zipfile.ZipFile(xapk_path) as xapk, zipfile.ZipFile(io.BytesIO(xapk.read('config.arm64_v8a.apk'))) as split:
+with zipfile.ZipFile(apk_path) as apk:
     assert len(manifest['files']) == 10
     for name, digest in manifest['files'].items():
         assert '/' not in name
-        data = xapk.read('com.bilibili.app.in.apk') if name == 'official.apk' else split.read('lib/arm64-v8a/' + name)
+        data = apk_path.read_bytes() if name == 'official.apk' else apk.read('lib/arm64-v8a/' + name)
         assert hashlib.sha256(data).hexdigest() == digest, name
         (destination / name).write_bytes(data)
 # Native helpers are private runtime assets, never merged with the mpv JNI namespace.

@@ -13,7 +13,7 @@
 #include "slot_pair.h"
 static uintptr_t player_base;static int player_matches;
 static int locate_player(struct dl_phdr_info *i,size_t n,void *p){(void)n;(void)p;const char *s=strrchr(i->dlpi_name,'/');s=s?s+1:i->dlpi_name;if(!strcmp(s,"libijk.so")){player_base=i->dlpi_addr;player_matches++;}return 0;}
-static int matches_player(void *find){player_base=0;player_matches=0;dl_iterate_phdr(locate_player,NULL);return player_matches==1&&*(void **)(player_base+0x2ca5f8)==find;}
+static int matches_player(void *find){player_base=0;player_matches=0;dl_iterate_phdr(locate_player,NULL);return player_matches==1&&*(void **)(player_base+0x2ca600)==find;}
 static void fail(JNIEnv *e,const char *s){(*e)->ThrowNew(e,(*e)->FindClass(e,"java/lang/IllegalStateException"),s);}
 struct runtime {void *lib,*ext;};
 static int owned_handles;
@@ -72,7 +72,7 @@ static const AVCodec *routed_find(int id){
 }
 static uintptr_t original_slots[2],routed_slots[2];
 static int route_pair(int install,int (*protect)(void *,size_t,int)){
- return patch_pair((uintptr_t *)(player_base+0x2ca5f8),(uintptr_t *)(player_base+0x2ca5e8),install?original_slots:routed_slots,install?routed_slots:original_slots,protect);
+ return patch_pair((uintptr_t *)(player_base+0x2ca600),(uintptr_t *)(player_base+0x2ca5f0),install?original_slots:routed_slots,install?routed_slots:original_slots,protect);
 }
 static const char *prepare_route(int endpoint,int virtualizer){
  if(open_runtime(&route_runtime))return "Locked player runtime unavailable";
