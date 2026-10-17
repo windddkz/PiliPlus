@@ -171,6 +171,16 @@ native 媒体项另有 ADDING、READY、DETACHING、REMOVING 状态。READY 通�
 
 E339 汇集本轮机制、页面回归和状态隔离结果。原始证据位于研究工作区 `execution/20261017-preload318/`：页面结果见 `page-rounds-summary.json`，回卷校验见 `reuse-wrap64k-high-fixed/extent-verification.json`，网络和内存见 `boundaries319/result.json`。源码入口为 `PreloadQueue`、`PlayUrlPrefetch`、`OfficialPreloadCache`、`OfficialMediaCache`、`OfficialRuntime` 及 `media_cache.c`。
 
+### 实际媒体供数与容量限制
+
+进一步计量把当前视频媒体、其他候选媒体和UI流量分开。317与321各完成首页9次、推荐往返6次打开；321推荐返回A的三个观察窗口由旧缓存实际供数约14.76、20.64、4.98MB，第三次B窗口的媒体网络读取为0、旧缓存供数约14.51MB。这些数字来自官方cache read返回的逻辑区间，与打开时的旧索引对应，并扣除了本次重新下载的部分，已经验证真实页面在复用媒体片段。
+
+全量候选覆盖也带来了额外网络成本：321首页9个窗口中，其他候选共读取约47.84MB；推荐6个窗口中约26.53MB。两进程PSS约1.17–1.40GiB，含诊断构建开销。退后台及关闭Wi-Fi后的停止行为仍以E339中的独立检查为准。首页素材及各轮恢复位置存在差异，跨版本加速和节流比例需要更严格的配对采样。
+
+本轮同时暴露了4K缓存配额不足的问题。一条含7个可选轨道的视频将127MiB平均分配后，实际视频轨只得到约18.14MiB。官方缓存填满会清除整棵区间树，返回时刚才的断点片段已经被后续预读覆盖。相同视频的两次返回分别重复读取约45.94、43.35MB；仅在研究包把该资源容量调至64MiB后，两次重复读取均为0，旧缓存实际供数约46.96、55.95MB。
+
+该对照确定了下一步修订方向：轨道容量分配要兼顾实际读入窗口，不能只按完整画质列表平均切分。生产321预算仍保持上表数值；通用分配、多轮回卷与容量回收的复测尚待完成。原始计量、操作到输出事件区间、研究包身份和限制见E340。计量结束已恢复321洁净包，研究版本留在本地。
+
 ### 媒体准备与窗口创建并行
 
 旧流程先等 Flutter 窗口，再创建播放器并打开媒体。194 改为同时进行媒体准备和窗口创建，真正启动 decoder 前仍等正确输出目标，create 从晚于 Surface 22/35ms 变为提前 188/82ms。201 又只对 Android 视频详情关闭 route snapshot，避免转场快照冻结真实视频绘制；受控窗口中 create→attach 从 278ms 变为 67ms，转场期间能够继续 paint。
@@ -526,3 +536,4 @@ CPU调查用自有诊断包短暂启用 profileable，simpleperf 与 Perfetto同
 |E329|`execution/20261017-tls305/RESULTS.md`|305/306：官方硬件GCM已接入实际播放器；首开与连续性未达标|
 |E338|`execution/20261014-startup-audit/FINDINGS.txt`|首播/CDN对照：初步代码证据，尚未完成计时归因|
 |E339|`execution/20261017-preload318/RESULTS.md`|预载候选调度、跨页片段留存、断点恢复及前后台解码状态隔离|
+|E340|`execution/20261017-preload-metrics322/RESULTS.md`|真实页面媒体供数、重复读取及4K缓存容量对照|
