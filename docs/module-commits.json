@@ -1,0 +1,1037 @@
+{
+  "base": "b2d6a5befb6dd292b9f7ad98794f3620f6dfb818",
+  "branch": "feat/official-player-alignment",
+  "note": "Historical source snapshots reconstructed as reviewable modules; initial foundation commits are interdependent. Documentation commits follow this code manifest. Product behavior remains candidate308/311; publication helpers/tests listed separately.",
+  "commits": [
+    {
+      "commit": "5e0f7cf77f9d4a8f65c0dec667e94c609d570a0b",
+      "title": "build(android): isolate and hash-lock the optional official runtime",
+      "source_candidate": 48,
+      "files": [
+        ".gitignore",
+        "android/app/build.gradle.kts",
+        "android/official-runtime-manifest.json",
+        "scripts/prepare_official_audio.py"
+      ]
+    },
+    {
+      "commit": "5273bba803a385ab3dd2655de93faf10c29806ef",
+      "title": "feat(audio): bridge original DSP, graph and output clock ABIs",
+      "source_candidate": 48,
+      "files": [
+        "android/official_audio/clock_adapter.h",
+        "android/official_audio/dsp_adapter.c",
+        "android/official_audio/graph_adapter.c",
+        "android/official_audio/graph_sret.S",
+        "android/official_audio/helper/dev/piliplus/dspbridge/DspBridge.java",
+        "android/official_audio/instruction_patch.h",
+        "android/official_audio/loudnorm_graph.h",
+        "android/official_audio/slot_pair.h",
+        "android/official_audio/startup_prefill.h",
+        "android/official_audio/video_trace.h"
+      ]
+    },
+    {
+      "commit": "5645e03bf00bada15c3fd85bc5ba63ffcf994926",
+      "title": "feat(media): validate DASH fragments, loudness and output endpoints",
+      "source_candidate": 48,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/AudioEndpointPolicy.java",
+        "android/app/src/main/java/com/example/piliplus/official/DashSource.java",
+        "android/app/src/main/java/com/example/piliplus/official/FragmentIndex.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialAudioRoute.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialLoudness.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntimeCache.java",
+        "android/validation/AudioEndpointPolicyCheck.java",
+        "android/validation/FragmentIndexCheck.java",
+        "android/validation/OfficialLoudnessCheck.java",
+        "android/validation/OfficialRuntimeCacheCheck.java"
+      ]
+    },
+    {
+      "commit": "1eb42d9192b83480e36b3e054b1fb8af507f5722",
+      "title": "feat(android): host official playback in a session-scoped service",
+      "source_candidate": 48,
+      "files": [
+        "android/app/src/main/AndroidManifest.xml",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlaybackService.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/app/src/main/kotlin/com/example/piliplus/MainActivity.kt",
+        "android/validation/OfficialFailureCheck.java",
+        "android/validation/OfficialRuntimeImageCheck.java"
+      ]
+    },
+    {
+      "commit": "65c0831480e75a13b0b4014ac77a56383e000b86",
+      "title": "feat(audio): coordinate playback focus and idempotent ducking",
+      "source_candidate": 48,
+      "files": [
+        "lib/plugin/pl_player/audio_ducking.dart",
+        "lib/services/audio_session.dart",
+        "lib/services/playback_focus.dart",
+        "validation/audio_ducking_test.dart",
+        "validation/playback_focus_test.dart"
+      ]
+    },
+    {
+      "commit": "e0467871afc8705e93ed294e79805ec1863be63c",
+      "title": "feat(player): expose official playback, seek and fallback contracts",
+      "source_candidate": 48,
+      "files": [
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "lib/plugin/pl_player/view/view.dart",
+        "lib/plugin/pl_player/widgets/official_video.dart",
+        "lib/plugin/pl_player/widgets/play_pause_btn.dart",
+        "validation/official_loudness_metadata_test.dart",
+        "validation/official_player_test.dart",
+        "validation/official_seek_test.dart"
+      ]
+    },
+    {
+      "commit": "f90dfc73336b03fd01842f87d89eb8c0c7639a1e",
+      "title": "feat(ui): integrate official playback into video and audio controls",
+      "source_candidate": 48,
+      "files": [
+        "lib/http/video.dart",
+        "lib/models/video/play/url.dart",
+        "lib/pages/audio/controller.dart",
+        "lib/pages/audio/view.dart",
+        "lib/pages/live_room/widgets/header_control.dart",
+        "lib/pages/setting/models/video_settings.dart",
+        "lib/pages/sponsor_block/block_mixin.dart",
+        "lib/pages/video/controller.dart",
+        "lib/pages/video/view.dart",
+        "lib/pages/video/widgets/header_control.dart",
+        "lib/utils/storage_key.dart",
+        "lib/utils/storage_pref.dart"
+      ]
+    },
+    {
+      "commit": "7dec420ccb3bc3fe87d2ea70be1bd6926cd438d3",
+      "title": "test(android): add isolated playback and lifecycle probes",
+      "source_candidate": 48,
+      "files": [
+        "android/app/src/debug/AndroidManifest.xml",
+        "android/app/src/debug/java/com/example/piliplus/official/OfficialBridgeProbe.java",
+        "android/app/src/debug/java/com/example/piliplus/official/OfficialPlaybackTestActivity.java",
+        "android/app/src/debug/java/com/example/piliplus/official/OfficialPluginTestActivity.java"
+      ]
+    },
+    {
+      "commit": "3b0f4195c16f834a84727da09526e544dcdd96bf",
+      "title": "feat(runtime): migrate the complete locked library set to official 9.14",
+      "source_candidate": 51,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/official-runtime-manifest.json",
+        "android/official_audio/clock_adapter.h",
+        "android/official_audio/dsp_adapter.c",
+        "android/official_audio/graph_adapter.c",
+        "android/official_audio/loudnorm_graph.h",
+        "android/official_audio/startup_prefill.h",
+        "android/official_audio/video_trace.h",
+        "android/validation/OfficialRuntimeImageCheck.java",
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "scripts/prepare_official_audio.py",
+        "validation/official_seek_test.dart"
+      ]
+    },
+    {
+      "commit": "4c88c536929a0f5e2024eb362e142f41bb467e10",
+      "title": "fix(video): restore foreground output and complete end-of-stream state",
+      "source_candidate": 54,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/official_seek_test.dart"
+      ]
+    },
+    {
+      "commit": "0305f011c413b1ccd99917cd5e7180f5ef353139",
+      "title": "feat(video): apply mirror transforms through the official renderer",
+      "source_candidate": 55,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlaybackService.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "lib/pages/video/widgets/header_control.dart",
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/official_player_test.dart"
+      ]
+    },
+    {
+      "commit": "6643f3f45b26daa2aca6e5ec0d8c75ecccf48e7b",
+      "title": "feat(video): compose fit modes with native mirror geometry",
+      "source_candidate": 60,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlaybackService.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "lib/plugin/pl_player/official_player.dart",
+        "lib/plugin/pl_player/view/view.dart",
+        "lib/plugin/pl_player/widgets/official_video.dart",
+        "validation/official_player_test.dart",
+        "validation/official_video_test.dart"
+      ]
+    },
+    {
+      "commit": "16e9e6f2191449e3b47b08ba43d61128b641f22d",
+      "title": "feat(audio): select the verified official loudness policy by default",
+      "source_candidate": 61,
+      "files": [
+        "lib/pages/setting/models/video_settings.dart",
+        "lib/utils/storage_pref.dart"
+      ]
+    },
+    {
+      "commit": "564cb0037f9d09f21b9534d1e9b21822215ce1e5",
+      "title": "fix(audio): align rate conversion and SoundTouch overlap parameters",
+      "source_candidate": 64,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/official_audio/graph_adapter.c",
+        "validation/OfficialRateTest.java",
+        "validation/graph_slot_test.py"
+      ]
+    },
+    {
+      "commit": "5de2b98106db2b22ab2321560fb3e903915d7eb3",
+      "title": "fix(audio): recreate HE-AAC decoder state after seek flush",
+      "source_candidate": 65,
+      "files": [
+        "android/official_audio/decoder_reset.h",
+        "android/official_audio/graph_adapter.c",
+        "android/official_audio/graph_sret.S",
+        "validation/decoder_reset_test.py"
+      ]
+    },
+    {
+      "commit": "92db837a2861efd52473e9f1225904a532e0b19c",
+      "title": "fix(android): acknowledge native teardown before disposing sessions",
+      "source_candidate": 66,
+      "files": [
+        "android/app/src/debug/java/com/example/piliplus/official/OfficialPlaybackTestActivity.java",
+        "android/app/src/debug/java/com/example/piliplus/official/OfficialPluginTestActivity.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "scripts/prepare_official_audio.py"
+      ]
+    },
+    {
+      "commit": "ca8841b66d90e89c60b730d7e3b00f4cbb7c6166",
+      "title": "feat(video): classify HDR metadata and attach HDR-capable surfaces",
+      "source_candidate": 67,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/DashSource.java",
+        "android/app/src/main/java/com/example/piliplus/official/FragmentIndex.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlaybackService.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialHdrSurface.java",
+        "android/validation/FragmentHdrCheck.java"
+      ]
+    },
+    {
+      "commit": "5f7c356b2f67725416804ea2ae92fd9a39149494",
+      "title": "fix(dolby): align decoder selection, endpoint and loudness rules",
+      "source_candidate": 68,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/FragmentIndex.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/official_audio/dsp_adapter.c",
+        "android/official_audio/graph_adapter.c",
+        "android/official_audio/helper/dev/piliplus/dspbridge/DspBridge.java",
+        "lib/plugin/pl_player/official_player.dart",
+        "android/validation/FragmentHdrCheck.java",
+        "android/official_audio/dolby_decoder_policy.h",
+        "android/validation/dolby_decoder_policy_test.c",
+        "validation/dolby_loudness_test.py"
+      ]
+    },
+    {
+      "commit": "7ceb605a8aa0c8008241a810bb421b47ab462ef4",
+      "title": "feat(audio-page): use the official backend for independent listening",
+      "source_candidate": 69,
+      "files": [
+        "lib/pages/audio/controller.dart",
+        "lib/pages/audio/view.dart",
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/official_player_test.dart"
+      ]
+    },
+    {
+      "commit": "de6dfbc9c357e0f6f2841399dd9a4252b83694b5",
+      "title": "fix(audio-page): bind loudness metadata before initial playback",
+      "source_candidate": 70,
+      "files": [
+        "lib/pages/audio/controller.dart",
+        "lib/pages/audio/view.dart",
+        "lib/pages/video/controller.dart"
+      ]
+    },
+    {
+      "commit": "bf6011f21adbc567a1f10f8b899e416ef3eaf737",
+      "title": "fix(buffering): recheck completion after a slow end-of-file seek",
+      "source_candidate": 72,
+      "files": [
+        "android/official_audio/graph_adapter.c",
+        "validation/buffering_recheck_test.py"
+      ]
+    },
+    {
+      "commit": "3f4330f025ef05ce701be8fac5e216156da51514",
+      "title": "fix(seek): preserve official playback when precise startup seek times out",
+      "source_candidate": 74,
+      "files": [
+        "lib/pages/audio/controller.dart",
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/official_seek_test.dart"
+      ]
+    },
+    {
+      "commit": "2234d2030e7e411d231f6fcf849528fa6102decb",
+      "title": "feat(stream): carry selected track IDs, bandwidth and backup URLs",
+      "source_candidate": 75,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialStream.java",
+        "android/validation/OfficialStreamCheck.java",
+        "lib/pages/audio/controller.dart",
+        "lib/pages/audio/view.dart",
+        "lib/pages/video/controller.dart",
+        "lib/plugin/pl_player/models/data_source.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/official_seek_test.dart"
+      ]
+    },
+    {
+      "commit": "812d8cfb3afd0884cf105c98feef27fa796c8fbe",
+      "title": "fix(network): stop probing once the fragment header is complete",
+      "source_candidate": 76,
+      "files": [
+        "android/app/src/debug/AndroidManifest.xml",
+        "android/app/src/debug/java/com/example/piliplus/official/OfficialPlaybackTestActivity.java",
+        "android/app/src/debug/res/xml/official_probe_network.xml",
+        "android/app/src/main/java/com/example/piliplus/official/DashSource.java",
+        "android/app/src/main/java/com/example/piliplus/official/FragmentIndex.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialStream.java",
+        "android/validation/DashProbeCheck.java",
+        "android/validation/OfficialStreamCheck.java",
+        "android/validation/ProbeEarlyReadCheck.java"
+      ]
+    },
+    {
+      "commit": "b4ac05db5403b37d18a6ebdfad15661e12e966e0",
+      "title": "feat(network): refresh expired resources without changing selected tracks",
+      "source_candidate": 81,
+      "files": [
+        "android/app/src/debug/java/com/example/piliplus/official/OfficialPlaybackTestActivity.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlaybackService.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialResourceRefresh.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialResourceRefreshCheck.java",
+        "lib/pages/audio/controller.dart",
+        "lib/pages/video/controller.dart",
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/models/data_source.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/official_player_test.dart"
+      ]
+    },
+    {
+      "commit": "bd47f76b8130d954c0ac94794454aaca1be5c557",
+      "title": "fix(network): recover initial expiry and retry audio-page failures",
+      "source_candidate": 83,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "lib/pages/audio/controller.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/official_player_test.dart"
+      ]
+    },
+    {
+      "commit": "f4f2a3b49743ab0d95374106e2685513ff78d821",
+      "title": "fix(network): distinguish refresh timeout from backend failure",
+      "source_candidate": 84,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java"
+      ]
+    },
+    {
+      "commit": "fa533fc3ca053dca45a03e87d267967fb0bf1d6a",
+      "title": "fix(audio-page): cancel obsolete source preparation on selection",
+      "source_candidate": 85,
+      "files": [
+        "lib/pages/audio/controller.dart",
+        "lib/plugin/pl_player/official_player.dart"
+      ]
+    },
+    {
+      "commit": "eabace0345f3ba7381c6b2368c7fcf7243a8c9cb",
+      "title": "fix(video): cancel preparation before handing over to another video",
+      "source_candidate": 87,
+      "files": [
+        "lib/plugin/pl_player/controller.dart"
+      ]
+    },
+    {
+      "commit": "82160582c65c664e281c34f8a86ffdc3c87fd149",
+      "title": "fix(video): reject details that arrive after the selection changes",
+      "source_candidate": 88,
+      "files": [
+        "lib/pages/video/introduction/ugc/controller.dart"
+      ]
+    },
+    {
+      "commit": "f27fa0ee22a975fdbb62f97694a13b859c09fed5",
+      "title": "fix(video): reject stale part-ID resolution results",
+      "source_candidate": 89,
+      "files": [
+        "lib/pages/video/introduction/ugc/controller.dart"
+      ]
+    },
+    {
+      "commit": "2f537b0b98e247bf6fb2fc3a77810355dad9ea9e",
+      "title": "feat(live): connect official playback and refreshed HLS sources",
+      "source_candidate": 94,
+      "files": [
+        "android/app/src/debug/java/com/example/piliplus/official/OfficialPlaybackTestActivity.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "lib/models_new/live/live_room_play_info/stream.dart",
+        "lib/pages/live_room/controller.dart",
+        "lib/pages/live_room/view.dart",
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/live_source_test.dart",
+        "validation/official_player_test.dart"
+      ]
+    },
+    {
+      "commit": "9c017339f544fdda6d25ff4b8587cde0eea1d65e",
+      "title": "fix(live): prevent cross-page playback and stale surface ownership",
+      "source_candidate": 98,
+      "files": [
+        "lib/pages/live_room/controller.dart",
+        "lib/pages/live_room/view.dart",
+        "lib/pages/video/view.dart"
+      ]
+    },
+    {
+      "commit": "592a7ac1e2e93f77f131925ca7ebb240dd6b8d69",
+      "title": "fix(clock): reset discontinuous media timelines without stale anchors",
+      "source_candidate": 104,
+      "files": [
+        "android/official_audio/graph_adapter.c",
+        "lib/pages/video/controller.dart",
+        "validation/graph_slot_test.py",
+        "android/official_audio/timeline_reset.h",
+        "android/validation/timeline_reset_test.c"
+      ]
+    },
+    {
+      "commit": "1717bb5d2f68e03e48b37849dd6d44c4a09a3cc2",
+      "title": "fix(android): recover a reclaimed player process within bounded retries",
+      "source_candidate": 107,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "lib/pages/video/view.dart",
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/official_player_test.dart",
+        "android/app/src/main/java/com/example/piliplus/official/ProcessReclaimPolicy.java",
+        "validation/ProcessReclaimPolicyTest.java"
+      ]
+    },
+    {
+      "commit": "94eb70cfb029aa7a9c7edd1e62d5db87d32503be",
+      "title": "fix(player): cancel playback intent during recovery and fallback",
+      "source_candidate": 108,
+      "files": [
+        "lib/plugin/pl_player/controller.dart"
+      ]
+    },
+    {
+      "commit": "f1b34a7854bbcc25b3263a0db6c1ab7de90ca370",
+      "title": "fix(sync): reanchor valid output timestamps after playback resumes",
+      "source_candidate": 118,
+      "files": [
+        "android/official_audio/clock_adapter.h",
+        "android/official_audio/clock_resume.h",
+        "android/official_audio/graph_adapter.c",
+        "android/validation/clock_resume_test.c"
+      ]
+    },
+    {
+      "commit": "b3ce9ce8f4b196a8a42bdc68b10e699cb24b5f9e",
+      "title": "fix(sync): freeze paused extrapolation and bound resume calibration",
+      "source_candidate": 122,
+      "files": [
+        "android/official_audio/clock_adapter.h",
+        "android/official_audio/clock_resume.h",
+        "android/validation/clock_resume_test.c"
+      ]
+    },
+    {
+      "commit": "79138711681e8e3f75184c7b6ae249fd634eb21e",
+      "title": "fix(android): clear portrait compositor residue during early rotation",
+      "source_candidate": 127,
+      "files": [
+        "android/app/src/main/kotlin/com/example/piliplus/MainActivity.kt"
+      ]
+    },
+    {
+      "commit": "d8047b4d47d74936b1c9944ca97e61190306df34",
+      "title": "fix(audio-route): update Dolby endpoints without reopening playback",
+      "source_candidate": 128,
+      "files": [
+        "android/app/src/debug/java/com/example/piliplus/official/OfficialPlaybackTestActivity.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlaybackService.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/official_audio/dolby_endpoint.h",
+        "android/official_audio/dsp_adapter.c",
+        "android/official_audio/helper/dev/piliplus/dspbridge/DspBridge.java",
+        "android/validation/dolby_endpoint_test.c",
+        "scripts/prepare_official_audio.py"
+      ]
+    },
+    {
+      "commit": "f4d3301211ddfa3e988436e362e4644c15e9af10",
+      "title": "fix(rate): serialize long-press speed changes and restore committed rate",
+      "source_candidate": 131,
+      "files": [
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "lib/plugin/pl_player/view/view.dart",
+        "validation/official_player_test.dart",
+        "lib/pages/setting/pages/play_speed_set.dart"
+      ]
+    },
+    {
+      "commit": "f30a16d3f4830c2831043e62fbb4f904a642cfaf",
+      "title": "fix(sync): invalidate resume calibration after seek and output flush",
+      "source_candidate": 135,
+      "files": [
+        "android/official_audio/clock_resume.h",
+        "android/validation/clock_resume_test.c"
+      ]
+    },
+    {
+      "commit": "e6a640ba024cd43711b78b0d2edd02b997eb6e70",
+      "title": "perf(startup): overlap runtime warmup with play URL requests",
+      "source_candidate": 142,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlaybackService.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "lib/pages/video/controller.dart",
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/official_player_test.dart"
+      ]
+    },
+    {
+      "commit": "efdcbcc4b746dfbc99217f09d664b1293773982d",
+      "title": "perf(probe): read audio and video headers concurrently",
+      "source_candidate": 146,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/DashSource.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/DashPairCheck.java"
+      ]
+    },
+    {
+      "commit": "45660a5db461508f1c6141258cf4887e97fb877f",
+      "title": "fix(rate): admit quarter speed through the guarded official renderer image",
+      "source_candidate": 148,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialRuntimeImageCheck.java"
+      ]
+    },
+    {
+      "commit": "8ec57ffb5c3391d201214f2f6384671f7bdb8ce2",
+      "title": "fix(rate): reflect applied native rate in controls and danmaku",
+      "source_candidate": 149,
+      "files": [
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/official_player_test.dart"
+      ]
+    },
+    {
+      "commit": "bac8002d7877853d997540f97c1c8259a7efcb5d",
+      "title": "feat(preload): default detail preparation on while preserving explicit preferences",
+      "source_candidate": 158,
+      "files": [
+        "lib/utils/storage_pref.dart",
+        "lib/pages/setting/models/extra_settings.dart"
+      ]
+    },
+    {
+      "commit": "297437a68ce6b2dc0cdcad77e3179458c7501a72",
+      "title": "perf(runtime): retain released idle services with session-safe retirement",
+      "source_candidate": 166,
+      "files": [
+        "android/app/src/debug/java/com/example/piliplus/official/OfficialPluginTestActivity.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlaybackService.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java"
+      ]
+    },
+    {
+      "commit": "73c3fa76ed0c92e7ab3fd2db77f5303608902e20",
+      "title": "perf(startup): warm the official runtime from the home page",
+      "source_candidate": 167,
+      "files": [
+        "lib/pages/main/view.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/official_player_test.dart"
+      ]
+    },
+    {
+      "commit": "ec1496e96f8047b9c55d736c52f6d43ed65d900c",
+      "title": "perf(feed): prefetch account-scoped play URLs for visible recommendations",
+      "source_candidate": 169,
+      "files": [
+        "lib/http/play_url_prefetch.dart",
+        "lib/http/retry_interceptor.dart",
+        "lib/http/video.dart",
+        "lib/pages/rcmd/view.dart",
+        "lib/pages/video/controller.dart",
+        "lib/utils/accounts/account_manager/account_mgr.dart",
+        "validation/play_url_prefetch_test.dart",
+        "validation/prefetch_request_test.dart"
+      ]
+    },
+    {
+      "commit": "9413ae88eb12151b67b41393d0999e9afe6bf426",
+      "title": "perf(runtime): store and align original DEX entries for class loading",
+      "source_candidate": 172,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "scripts/prepare_official_audio.py",
+        "validation/official_dex_archive_test.py"
+      ]
+    },
+    {
+      "commit": "3dd86fdc6b3dcd8918d51d96819bcc9c77e6faeb",
+      "title": "perf(preload): transfer native media ownership into foreground playback",
+      "source_candidate": 173,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlaybackService.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/official_audio/graph_adapter.c",
+        "android/official_audio/helper/dev/piliplus/dspbridge/DspBridge.java",
+        "lib/http/video.dart",
+        "lib/models/video/play/url.dart",
+        "lib/pages/video/controller.dart",
+        "lib/plugin/pl_player/models/data_source.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/official_player_test.dart",
+        "lib/models/video/play/selection.dart",
+        "validation/dash_selection_test.dart",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPreloadCache.java",
+        "android/validation/OfficialPreloadCacheTest.java",
+        "android/official_audio/preload_interrupt_guards.h"
+      ]
+    },
+    {
+      "commit": "7f04258c1fb2555f1395e0bdf475b243f7308924",
+      "title": "perf(preload): prepare fallback metadata outside the control worker",
+      "source_candidate": 178,
+      "files": [
+        "android/app/build.gradle.kts",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java"
+      ]
+    },
+    {
+      "commit": "fb0f61427d95a58ecbd666ab04b54d6d5873ecf5",
+      "title": "perf(preload): reuse in-flight probes with bounded handoff waits",
+      "source_candidate": 181,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPreloadCache.java",
+        "android/validation/OfficialPreloadCacheTest.java",
+        "android/validation/PreloadProbeCheck.java"
+      ]
+    },
+    {
+      "commit": "907363cedb7200241295b3d009f4ed92cda62d22",
+      "title": "perf(metadata): reuse native DASH metadata and classify HDR on the same item",
+      "source_candidate": 187,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialStream.java",
+        "android/official_audio/helper/dev/piliplus/dspbridge/DspBridge.java",
+        "android/validation/OfficialStreamCheck.java",
+        "lib/http/video.dart",
+        "lib/pages/video/controller.dart",
+        "lib/plugin/pl_player/models/data_source.dart",
+        "scripts/prepare_official_audio.py",
+        "validation/official_seek_test.dart",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPreloadCache.java",
+        "android/validation/OfficialPreloadCacheTest.java",
+        "android/official_audio/media_index.c",
+        "android/official_audio/media_index_guards.h",
+        "android/official_audio/media_metadata.c",
+        "android/official_audio/media_metadata_guards.h"
+      ]
+    },
+    {
+      "commit": "f50ebe25dd2a22205d7fdbb5746c3b52282947ec",
+      "title": "perf(runtime): use an ART-compatible platform parent loader",
+      "source_candidate": 189,
+      "files": [
+        "android/app/build.gradle.kts",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java"
+      ]
+    },
+    {
+      "commit": "59b5491d5f9f7afdcf6d8ad9b4c95ea90c4c8da2",
+      "title": "perf(cache): reuse bounded native media cache directories",
+      "source_candidate": 191,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialMediaCache.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialMediaCacheCheck.java"
+      ]
+    },
+    {
+      "commit": "f21c90fe08439a74f6b6cfb4ecae50b39a8efb09",
+      "title": "perf(startup): overlap media preparation with surface attachment",
+      "source_candidate": 194,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialMediaCache.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlaybackService.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialOutputWaitCheck.java"
+      ]
+    },
+    {
+      "commit": "a74cee119442f6b78f9873609b810ae34be27b44",
+      "title": "perf(preload): renew visible foreground candidates without downloading again",
+      "source_candidate": 197,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPreloadCache.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialPreloadCacheTest.java",
+        "lib/http/play_url_prefetch.dart",
+        "lib/http/video.dart",
+        "lib/pages/rcmd/view.dart",
+        "validation/play_url_prefetch_test.dart"
+      ]
+    },
+    {
+      "commit": "8c3b349499a957d9baae6ab0d0ee91c27e7a8611",
+      "title": "perf(preload): bound candidates to three visible recommendation cards",
+      "source_candidate": 198,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPreloadCache.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialPreloadCacheTest.java",
+        "lib/pages/rcmd/preload_candidates.dart",
+        "lib/pages/rcmd/view.dart",
+        "validation/preload_candidates_test.dart",
+        "android/validation/OfficialPreloadQueueCheck.java"
+      ]
+    },
+    {
+      "commit": "d8bb6191620caf682310ef80cc8b910bfeef8d77",
+      "title": "perf(video): render video pages during Android route transitions",
+      "source_candidate": 201,
+      "files": [
+        "lib/main.dart",
+        "lib/router/video_route_app.dart",
+        "validation/video_route_test.dart"
+      ]
+    },
+    {
+      "commit": "719733f42620135de758402a699ca93c1edd1b25",
+      "title": "perf(preload): acquire unfinished media before reaching preload watermarks",
+      "source_candidate": 203,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialPreloadCacheTest.java"
+      ]
+    },
+    {
+      "commit": "907b4422e70078fa8521d75cc53a4dc3b6a7415b",
+      "title": "perf(preload): acquire the selected item before cancelling other tasks",
+      "source_candidate": 204,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialPreloadQueueCheck.java"
+      ]
+    },
+    {
+      "commit": "61b161a832f1231919708ec904fd00def674127f",
+      "title": "perf(read): bound EAGAIN polling waits to ten milliseconds",
+      "source_candidate": 206,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialRuntimeImageCheck.java"
+      ]
+    },
+    {
+      "commit": "14904288315c150338f60ea9318b45a57992c9ef",
+      "title": "perf(dash): skip the unread initial zero-position seek only",
+      "source_candidate": 213,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/official_audio/first_seek.c",
+        "android/official_audio/first_seek_guards.h",
+        "android/official_audio/helper/dev/piliplus/dspbridge/DspBridge.java",
+        "android/validation/first_seek_test.c",
+        "scripts/prepare_official_audio.py"
+      ]
+    },
+    {
+      "commit": "48c3bd003404092c823555ba4f1ce895bd0b9d64",
+      "title": "fix(preload): repeat IO cancellation until native removal acknowledges",
+      "source_candidate": 214,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPreloadCache.java",
+        "android/validation/OfficialPreloadCancelTest.java"
+      ]
+    },
+    {
+      "commit": "6c45db082f6447ec4d9539f538a24259770dcbe7",
+      "title": "perf(feed): start prefetch as soon as new recommendations arrive",
+      "source_candidate": 215,
+      "files": [
+        "lib/pages/rcmd/view.dart"
+      ]
+    },
+    {
+      "commit": "8a1940e93c52709f0668073a9e6c609bfbbc5002",
+      "title": "fix(buffering): account for decoded frames in supply watermarks",
+      "source_candidate": 234,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/official_audio/clock_adapter.h",
+        "android/official_audio/graph_adapter.c",
+        "android/validation/OfficialRuntimeImageCheck.java",
+        "android/official_audio/audio_buffer.h",
+        "android/validation/audio_buffer_test.c"
+      ]
+    },
+    {
+      "commit": "85a53e4f839234e14dd4e95ad98a6a6abc49e074",
+      "title": "fix(buffering): prefer decoded duration before compressed packet duration",
+      "source_candidate": 235,
+      "files": [
+        "android/official_audio/audio_buffer.h"
+      ]
+    },
+    {
+      "commit": "27c07ec70e01a25cd92b8be3859ffb9327e49d41",
+      "title": "fix(buffering): recognize prepared video frames during initial buffering",
+      "source_candidate": 240,
+      "files": [
+        "android/official_audio/audio_buffer.h",
+        "android/validation/audio_buffer_test.c"
+      ]
+    },
+    {
+      "commit": "e1ec7af83cbcf3e80342fafb0a614135cb26ab90",
+      "title": "feat(codec): preserve AV1 descriptors through native DASH selection",
+      "source_candidate": 244,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/official_audio/graph_sret.S",
+        "android/official_audio/helper/dev/piliplus/dspbridge/DspBridge.java",
+        "android/official_audio/media_dash.c",
+        "android/official_audio/media_dash.h",
+        "android/official_audio/media_dash_guards.h",
+        "android/validation/media_dash_test.c",
+        "scripts/prepare_official_audio.py"
+      ]
+    },
+    {
+      "commit": "72836d258da014cb52ab09fa4ffc8bdcd0769936",
+      "title": "perf(network): remove only the scoped successful TLS-read sleep",
+      "source_candidate": 259,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/official_audio/helper/dev/piliplus/dspbridge/DspBridge.java",
+        "android/official_audio/network_read.c",
+        "android/validation/network_read_test.c",
+        "scripts/prepare_official_audio.py"
+      ]
+    },
+    {
+      "commit": "5f6cc68f54af3d93b45007db4f0e187115b0ee0d",
+      "title": "feat(video): display the matching cover until the first rendered video frame",
+      "source_candidate": 262,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "lib/pages/video/introduction/ugc/controller.dart",
+        "lib/pages/video/view.dart",
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "lib/plugin/pl_player/view/view.dart",
+        "validation/official_seek_test.dart"
+      ]
+    },
+    {
+      "commit": "fc387b7b8a2364eddbd6f22df0cddcceaa73b1eb",
+      "title": "perf(preload): isolate foreground metadata preparation from background work",
+      "source_candidate": 265,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPreloadCache.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialForegroundPreloadCheck.java"
+      ]
+    },
+    {
+      "commit": "92705adc98fd4a30591c7aab841faa56ca0c098a",
+      "title": "fix(dash): read final packet and EOF state under the same queue lock",
+      "source_candidate": 284,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialRuntimeImageCheck.java"
+      ]
+    },
+    {
+      "commit": "89549996a163cd87d30b4a4b7a588c934966dd03",
+      "title": "fix(quality): align segment timestamps and serialize adaptive switch dispatch",
+      "source_candidate": 285,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/official_audio/helper/dev/piliplus/dspbridge/DspBridge.java",
+        "android/validation/OfficialRuntimeImageCheck.java",
+        "scripts/prepare_official_audio.py",
+        "android/official_audio/media_switch.c",
+        "android/official_audio/media_switch_guards.h"
+      ]
+    },
+    {
+      "commit": "a484d9c58004d27592d41300ed15c92322542565",
+      "title": "feat(quality): carry codec-compatible ladders into official automatic selection",
+      "source_candidate": 288,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlaybackService.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialVideoTracks.java",
+        "android/official_audio/helper/dev/piliplus/dspbridge/DspBridge.java",
+        "android/official_audio/startup_choice.c",
+        "android/official_audio/startup_choice_guards.h",
+        "android/validation/OfficialVideoBundleCheck.java",
+        "android/validation/OfficialVideoTracksCheck.java",
+        "lib/http/video.dart",
+        "lib/models/video/play/selection.dart",
+        "lib/models/video/play/url.dart",
+        "lib/pages/video/controller.dart",
+        "lib/plugin/pl_player/models/data_source.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "scripts/prepare_official_audio.py",
+        "validation/dash_selection_test.dart",
+        "validation/official_player_test.dart",
+        "android/validation/OfficialVideoControlCheck.java"
+      ]
+    },
+    {
+      "commit": "8f2d93820afc78fc0c8e52e8ca4e1bc24d37ace3",
+      "title": "feat(quality): share confirmed quality controls and refresh complete ladders",
+      "source_candidate": 290,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialVideoTracks.java",
+        "android/validation/OfficialVideoTracksCheck.java",
+        "lib/http/video.dart",
+        "lib/models/video/play/selection.dart",
+        "lib/pages/video/controller.dart",
+        "lib/pages/video/widgets/header_control.dart",
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/models/data_source.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "lib/plugin/pl_player/view/view.dart",
+        "lib/utils/storage_key.dart",
+        "lib/utils/storage_pref.dart",
+        "validation/dash_selection_test.dart",
+        "validation/official_player_test.dart"
+      ]
+    },
+    {
+      "commit": "39bf1968f1e83a930c54e9cdc7f7872ea8a6243e",
+      "title": "feat(codec): use official hardware capabilities for unset codec preferences",
+      "source_candidate": 298,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlaybackService.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "lib/http/video.dart",
+        "lib/pages/setting/models/video_settings.dart",
+        "lib/pages/video/controller.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "lib/utils/storage_pref.dart",
+        "validation/dash_selection_test.dart",
+        "validation/official_player_test.dart",
+        "validation/playback_codec_preferences_test.dart"
+      ]
+    },
+    {
+      "commit": "0ea121a9f452cfe0fbcb43dd469467813cf2f41d",
+      "title": "perf(tls): adapt authenticated GCM reads to the bundled hardware EVP path",
+      "source_candidate": 306,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/official_audio/helper/dev/piliplus/dspbridge/DspBridge.java",
+        "android/official_audio/tls_crypto.c",
+        "android/validation/OfficialRuntimeImageCheck.java",
+        "android/validation/tls_crypto_test.c",
+        "scripts/prepare_official_audio.py"
+      ]
+    },
+    {
+      "commit": "3a7e8b119147fbd26687d7309731562c76caac76",
+      "title": "fix(codec): reject invalid bitstream filters after adaptive decoder flush",
+      "source_candidate": 308,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/official_audio/helper/dev/piliplus/dspbridge/DspBridge.java",
+        "android/official_audio/media_adaptive.c",
+        "android/official_audio/media_adaptive_guards.h",
+        "android/validation/media_adaptive_test.c",
+        "scripts/prepare_official_audio.py"
+      ]
+    },
+    {
+      "commit": "7bea3b08bcf66bdc15d6d80df4f0ac412e62d49a",
+      "title": "build(android): accept explicit local official-runtime toolchain inputs",
+      "source_candidate": null,
+      "files": [
+        "scripts/prepare_official_audio.py",
+        "validation/official_dex_archive_test.py"
+      ]
+    },
+    {
+      "commit": "eaa86894edcdaacc644ebc05810c34708ebbe523",
+      "title": "build(flutter): replay Android patches within a dedicated toolchain",
+      "source_candidate": null,
+      "files": [
+        "scripts/apply_android_patches.py"
+      ]
+    },
+    {
+      "commit": "5439d5f7a23408aa01333afd61d157c731d07375",
+      "title": "test(audio): limit buffering harness extraction to the gate",
+      "source_candidate": null,
+      "files": [
+        "validation/buffering_recheck_test.py"
+      ]
+    }
+  ]
+}
