@@ -467,11 +467,14 @@ class UgcIntroController extends CommonIntroController with ReloadMixin {
     }
   }
 
+  int _episodeChangeRequest = 0;
+
   // 修改分P或番剧分集
   Future<bool> onChangeEpisode(
     BaseEpisodeItem episode, {
     bool isStein = false,
   }) async {
+    final request = ++_episodeChangeRequest;
     try {
       final String bvid = episode.bvid ?? this.bvid;
       final int aid = episode.aid ?? IdUtils.bv2av(bvid);
@@ -484,7 +487,7 @@ class UgcIntroController extends CommonIntroController with ReloadMixin {
           dimension = res.dimension;
         }
       }
-      if (cid == null) {
+      if (isClosed || request != _episodeChangeRequest || cid == null) {
         return false;
       }
 
