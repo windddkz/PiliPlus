@@ -1,4 +1,4 @@
-> 本 fork 的官方播放器研究代码位于 `feat/official-player-alignment` 分支。工程文档：[官方 libijk 接入、音效与同步](docs/official-player-integration.md) · [首开优化与证据审查](docs/video-startup-optimization.md)。官方二进制需本地提供；完整对齐与稳定 400–500ms 尚未验收。
+> 本 fork 的官方播放器研究代码位于 `feat/official-player-alignment` 分支。工程文档：[官方 libijk 接入、音效与同步](docs/official-player-integration.md) · [首开优化与证据审查](docs/video-startup-optimization.md)。维护记录：[317 代码整理与上游合并](docs/maintenance-317-review.md)。官方二进制需本地提供；完整对齐与稳定 400–500ms 尚未验收。
 
 <div align="center">
     <img width="200" height="200" src="assets/images/logo/logo.png">

@@ -287,7 +287,7 @@ python3 validation/official_dex_archive_test.py --apk /path/to/local/official-9.
 
 工具链需预先安装，FFmpeg 源目录需已配置并含 `libavutil/avconfig.h`；命令不自动下载官方 APK。`apply_android_patches.py` 读取上游现有 patch 列表（25 个 SDK、9 个 material_ui），只允许专用工具链根下的目录，已应用时逆向检查跳过，失配停止。避免直接运行会修改全局 Git 身份、reset SDK 或删除缓存的旧脚本。共享 SDK 不适合作为实验补丁目录。
 
-准备脚本先检查必需文件与 APK 哈希，再生成资产；不能用 `python -O` 绕过其 assert 身份守卫。`--fixtures` 是可选 debug 样本，需另给 `--fixture-dir` 或研究工作区中的自制样本目录；普通 profile 打包不需要这些私有夹具。研究目录中的夹具/捕获工具并未全部随 fork 发布，不能把所有历史实验写成一键可重现。
+准备脚本先检查必需文件与 APK 哈希，再生成资产；317 将身份和目录守卫改为显式检查，`python -O` 下也会拒绝错误输入。`--fixtures` 是可选 debug 样本，需另给 `--fixture-dir` 或研究工作区中的自制样本目录；普通 profile 打包不需要这些私有夹具。研究目录中的夹具/捕获工具并未全部随 fork 发布，不能把所有历史实验写成一键可重现。
 
 ### 打包与安装
 
@@ -321,7 +321,7 @@ python3 validation/dolby_loudness_test.py
 
 timeline、audio_buffer、media_adaptive、media_dash、Dolby policy、first_seek 也有独立 C 检查；Dolby endpoint 需配置好的 FFmpeg include。`network_read_test.c` 含 ARM64 汇编，应交叉编译后在适配的自有 ARM64 进程运行；TLS 测试还需锁定的原库，不能把主机编译失败误判产品故障。
 
-整理 fork 时重新运行上述四个 Python 检查、8 个主机 C 检查与 DEX/资产核验，通过范围见证据库的 `publication_validation`。buffering 脚本最初截取了无关的 `previous_pts` 声明导致 `-Werror`，只修正测试截取边界；没有修改生产 gate。该次整理未重新执行全量 Android Lint、所有 Dart/真机测试。既有 Android Lint 27 错误/48 警告不在本轮宣称修复。
+整理 fork 时重新运行上述四个 Python 检查、8 个主机 C 检查与 DEX/资产核验，通过范围见证据库的 `publication_validation`。buffering 脚本最初截取了无关的 `previous_pts` 声明导致 `-Werror`，只修正测试截取边界；没有修改生产 gate。该次整理未重新执行全量 Android Lint、所有 Dart/真机测试。这是整理 fork 时的历史结果。317 重新完成了全仓检查、上游合并和代码整理，当前验证范围及遗留 Lint 见[317 审查记录](maintenance-317-review.md)。
 
 ### 有意义的信号与样本
 
