@@ -78,6 +78,201 @@ void main() {
     audioOnly: false,
   );
 
+  test('resource refresh commits only after native acceptance and ignores duplicate requests', () async {
+    final p = await create();
+    final result = Completer<NetworkSource?>();
+    var requests = 0;
+    var commits = 0;
+    final source = NetworkSource(
+      videoSource: 'https://example.invalid/video',
+      audioSource: 'https://example.invalid/audio',
+      refresh: (_) {
+        requests++;
+        return result.future;
+      },
+      onRefreshed: (previous, next) {
+        commits++;
+      },
+    );
+    final opening = p.openSource(
+      source,
+      userAgent: 'test',
+      referer: '',
+      audioOnly: true,
+    );
+    await Future<void>.delayed(Duration.zero);
+    await emit({'event': 'prepared'});
+    await opening;
+    await emit({'event': 'resource_refresh', 'requestId': 41});
+    await emit({'event': 'resource_refresh', 'requestId': 41});
+    expect(requests, 1);
+    await p.pause();
+    result.complete(
+      NetworkSource(
+        videoSource: 'https://example.invalid/fresh-video',
+        audioSource: 'https://example.invalid/fresh-audio',
+        audioTrack: DashTrack(
+          source: 'https://example.invalid/fresh-audio',
+          id: 30251,
+          bandwidth: 999,
+          urls: ['https://example.invalid/backup-audio'],
+        ),
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+    final answer =
+        calls.singleWhere((c) => c.method == 'resourceUpdate').arguments as Map;
+    expect(answer['source'], 'https://example.invalid/fresh-audio');
+    expect(answer.containsKey('audio'), false);
+    expect(answer['sourceTrack']['id'], 30251);
+    expect(answer['requestId'], 41);
+    expect(answer['load'], 1);
+    expect(p.state.position, Duration.zero);
+    expect(commits, 0);
+    await emit({'event': 'resource_updated', 'requestId': 40});
+    expect(commits, 0);
+    await emit({'event': 'resource_updated', 'requestId': 41});
+    expect(commits, 1);
+    await emit({'event': 'resource_updated', 'requestId': 41});
+    await emit({'event': 'resource_refresh', 'requestId': 41});
+    expect(commits, 1);
+    expect(requests, 1);
+    await p.dispose();
+  });
+
+  test('a newer native request supersedes a pending refresh without changing source early', () async {
+    final p = await create();
+    final first = Completer<NetworkSource?>();
+    final second = Completer<NetworkSource?>();
+    final committed = <String>[];
+    var requests = 0;
+    final source = NetworkSource(
+      videoSource: 'https://example.invalid/old',
+      audioSource: null,
+      refresh: (_) => ++requests == 1 ? first.future : second.future,
+      onRefreshed: (_, next) => committed.add(next.videoSource),
+    );
+    final opening = p.openSource(
+      source,
+      userAgent: 'test',
+      referer: '',
+      audioOnly: true,
+    );
+    await Future<void>.delayed(Duration.zero);
+    await emit({'event': 'prepared'});
+    await opening;
+    await emit({'event': 'resource_refresh', 'requestId': 1});
+    await emit({'event': 'resource_refresh', 'requestId': 2});
+    expect(requests, 2);
+    first.complete(
+      NetworkSource(
+        videoSource: 'https://example.invalid/late',
+        audioSource: null,
+      ),
+    );
+    second.complete(
+      NetworkSource(
+        videoSource: 'https://example.invalid/current',
+        audioSource: null,
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+    final replies = calls
+        .where((call) => call.method == 'resourceUpdate')
+        .toList();
+    expect(replies.length, 1);
+    expect(replies.single.arguments['requestId'], 2);
+    expect(committed, isEmpty);
+    await emit({'event': 'resource_updated', 'requestId': 1});
+    expect(committed, isEmpty);
+    await emit({'event': 'resource_updated', 'requestId': 2});
+    expect(committed, ['https://example.invalid/current']);
+    await p.dispose();
+  });
+
+  test(
+    'refresh from a replaced source cannot send its late response',
+    () async {
+      final p = await create();
+      final pending = Completer<NetworkSource?>();
+      final opening = p.openSource(
+        NetworkSource(
+          videoSource: 'https://example.invalid/old',
+          audioSource: null,
+          refresh: (_) => pending.future,
+        ),
+        userAgent: 'test',
+        referer: '',
+        audioOnly: true,
+      );
+      await Future<void>.delayed(Duration.zero);
+      await emit({'event': 'prepared'});
+      await opening;
+      await emit({'event': 'resource_refresh', 'requestId': 51});
+      final next = open(p);
+      await Future<void>.delayed(Duration.zero);
+      await emit({'event': 'prepared', 'load': 2});
+      await next;
+      pending.complete(
+        NetworkSource(
+          videoSource: 'https://example.invalid/too-late',
+          audioSource: null,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.where((c) => c.method == 'resourceUpdate'), isEmpty);
+      await p.dispose();
+    },
+  );
+
+  test('fruitless refresh is bounded and resource failure clears buffering without fallback', () async {
+    final p = await create();
+    var requests = 0;
+    late NetworkSource source;
+    source = NetworkSource(
+      videoSource: 'https://example.invalid/audio',
+      audioSource: null,
+      refresh: (_) async {
+        requests++;
+        return source;
+      },
+    );
+    final opening = p.openSource(
+      source,
+      userAgent: 'test',
+      referer: '',
+      audioOnly: true,
+    );
+    await Future<void>.delayed(Duration.zero);
+    await emit({'event': 'prepared'});
+    await opening;
+    final errors = <String>[];
+    final subscription = p.stream.error.listen(errors.add);
+    for (var i = 1; i <= 4; i++) {
+      await emit({'event': 'resource_refresh', 'requestId': i});
+    }
+    expect(requests, 3);
+    expect(
+      calls
+          .where((c) => c.method == 'resourceUpdate')
+          .map((c) => c.arguments['available']),
+      [true, true, true, false],
+    );
+    await emit({'event': 'buffering', 'buffering': true});
+    await emit({'event': 'resource_error', 'error': 'resource_unavailable'});
+    expect(p.state.buffering, false);
+    expect(p.state.playing, false);
+    expect(errors, ['official:resource_unavailable']);
+    expect(
+      OfficialPlayer.isResourceFailure(
+        PlatformException(code: 'native_process_died'),
+      ),
+      false,
+    );
+    await subscription.cancel();
+    await p.dispose();
+  });
+
   test(
     'viewport waits for preparation, deduplicates and follows source load',
     () async {
@@ -206,7 +401,7 @@ void main() {
         opening,
         throwsA(
           isA<PlatformException>().having(
-            (error) => OfficialPlayer.failureCode(error),
+            OfficialPlayer.failureCode,
             'diagnostic',
             'native_process_died (unexpected_exit/player_create/reason_5/status_11)',
           ),

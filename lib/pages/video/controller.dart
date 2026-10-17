@@ -760,6 +760,8 @@ class VideoDetailController extends GetxController
               audioSource: audioUrl,
               videoTrack: _videoTrack,
               audioTrack: _audioTrack,
+              refresh: _refreshOfficialSource,
+              onRefreshed: _acceptRefreshedSource,
             ),
       seekTo: seek,
       duration: data.timeLength == null
@@ -838,6 +840,69 @@ class VideoDetailController extends GetxController
       language: currLang.value,
       voiceBalance: plPlayerController.requestLoudnessMetadata,
     );
+  }
+
+  Future<NetworkSource?> _refreshOfficialSource(NetworkSource source) async {
+    final request = _videoUrlRequest;
+    final videoTrack = source.videoTrack;
+    final audioTrack = source.audioTrack;
+    final codec = firstVideo.codecid;
+    final player = plPlayerController.videoPlayerController;
+    bool current() =>
+        _isCurrentVideoUrl(request) &&
+        identical(plPlayerController.dataSource, source) &&
+        identical(plPlayerController.videoPlayerController, player);
+    if (!current() || videoTrack == null) return null;
+    final result = await _getVideoUrl(videoTrack.id);
+    if (!current()) return null;
+    if (result case Success(:final response)) {
+      final video = response.dash?.video
+          ?.where(
+            (item) => item.id == videoTrack.id && item.codecid == codec,
+          )
+          .firstOrNull;
+      final audio = response.dash?.audio
+          ?.where(
+            (item) => item.id == audioTrack?.id,
+          )
+          .firstOrNull;
+      if (video == null || (audioTrack != null && audio == null)) return null;
+      final videoUrl = VideoUtils.getCdnUrl(video.playUrls);
+      final audioUrl = audio == null
+          ? null
+          : VideoUtils.getCdnUrl(audio.playUrls, isAudio: true);
+      final next = NetworkSource(
+        videoSource: videoUrl,
+        audioSource: audioUrl,
+        videoTrack: DashTrack(
+          source: videoUrl,
+          id: video.id,
+          bandwidth: video.bandWidth,
+          urls: video.playUrls,
+        ),
+        audioTrack: audio == null
+            ? null
+            : DashTrack(
+                source: audioUrl!,
+                id: audio.id,
+                bandwidth: audio.bandWidth,
+                urls: audio.playUrls,
+              ),
+        refresh: _refreshOfficialSource,
+        onRefreshed: _acceptRefreshedSource,
+      );
+      return next;
+    }
+    return null;
+  }
+
+  void _acceptRefreshedSource(NetworkSource previous, NetworkSource next) {
+    if (isClosed || !identical(plPlayerController.dataSource, previous)) return;
+    videoUrl = next.videoSource;
+    audioUrl = next.audioSource;
+    _videoTrack = next.videoTrack;
+    _audioTrack = next.audioTrack;
+    plPlayerController.dataSource = next;
   }
 
   Future<void> _supplementVideoQualities(PlayUrlModel resource) async {

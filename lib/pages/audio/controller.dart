@@ -17,8 +17,10 @@ import 'package:PiliPlus/grpc/bilibili/app/listener/v1.pb.dart'
 import 'package:PiliPlus/http/browser_ua.dart';
 import 'package:PiliPlus/http/constants.dart';
 import 'package:PiliPlus/http/loading_state.dart';
+import 'package:PiliPlus/http/video.dart';
 import 'package:PiliPlus/models/common/audio_normalization.dart';
-import 'package:PiliPlus/models/video/play/url.dart' as http_model show Volume;
+import 'package:PiliPlus/models/common/video/video_type.dart';
+import 'package:PiliPlus/models/video/play/url.dart' as http_model;
 import 'package:PiliPlus/pages/common/common_intro_controller.dart'
     show FavMixin;
 import 'package:PiliPlus/pages/dynamics_repost/view.dart';
@@ -126,7 +128,12 @@ class AudioController extends GetxController
 
   void _reportError(Object error) {
     if (!_closing) {
-      SmartDialog.showToast('音频播放失败：${OfficialPlayer.failureCode(error)}');
+      SmartDialog.showToast(
+        error == 'official:resource_unavailable' ||
+                OfficialPlayer.isResourceFailure(error)
+            ? '播放地址失效，重新取流失败，请重试'
+            : '音频播放失败：${OfficialPlayer.failureCode(error)}',
+      );
     }
   }
 
@@ -392,6 +399,26 @@ class AudioController extends GetxController
     final revision = ++_sourceRevision;
     _wantsPlay = true;
     _querySponsorBlock();
+    final web = await _ugcAudioSource();
+    if (!_currentSource(revision)) return false;
+    final audios = web?.dash?.audio;
+    if (audios != null && audios.isNotEmpty) {
+      final audio = audios.findClosestTarget(
+        (item) => item.id <= cacheAudioQa,
+        (a, b) => a.id > b.id ? a : b,
+      );
+      final source = _httpAudioSource(audio);
+      position.value = 0;
+      await _onOpenMedia(
+        source.videoSource,
+        track: source.videoTrack,
+        ua: BrowserUa.pc,
+        referer: HttpString.baseUrl,
+        volume: web?.volume,
+        revision: revision,
+      );
+      return _currentSource(revision);
+    }
     final res = await AudioGrpc.audioPlayUrl(
       itemType: itemType,
       oid: oid,
@@ -405,6 +432,45 @@ class AudioController extends GetxController
       res.toast();
       return false;
     }
+  }
+
+  Future<http_model.PlayUrlModel?> _ugcAudioSource() async {
+    if (itemType != 1 || subId.isEmpty) return null;
+    // The listener API can omit HiRes/Dolby tracks that the video API provides.
+    final result = await VideoHttp.videoUrl(
+      avid: oid.toInt(),
+      cid: subId.first.toInt(),
+      qn: 80,
+      tryLook: false,
+      videoType: VideoType.ugc,
+      voiceBalance: true,
+      language: _videoDetailController?.cid.value == subId.first.toInt()
+          ? _videoDetailController?.currLang.value
+          : null,
+    );
+    return result.dataOrNull;
+  }
+
+  NetworkSource _networkAudioSource(String url, DashTrack? track) =>
+      NetworkSource(
+        videoSource: url,
+        audioSource: null,
+        videoTrack: track,
+        refresh: _refreshOfficialSource,
+        onRefreshed: _acceptRefreshedSource,
+      );
+
+  NetworkSource _httpAudioSource(http_model.AudioItem audio) {
+    final url = VideoUtils.getCdnUrl(audio.playUrls, isAudio: true);
+    return _networkAudioSource(
+      url,
+      DashTrack(
+        source: url,
+        id: audio.id,
+        bandwidth: audio.bandWidth,
+        urls: audio.playUrls,
+      ),
+    );
   }
 
   Future<void> _onPlay(PlayURLResp data, int revision) async {
@@ -500,6 +566,7 @@ class AudioController extends GetxController
           await _openCurrent(start);
         } catch (error) {
           if (!_currentSource(source) || player is! OfficialPlayer) rethrow;
+          if (OfficialPlayer.isResourceFailure(error)) rethrow;
           await _switchToMpv(
             '官方开片失败：${OfficialPlayer.failureCode(error)}',
             position: start,
@@ -518,11 +585,7 @@ class AudioController extends GetxController
     final current = player!;
     if (current is OfficialPlayer) {
       await current.openSource(
-        NetworkSource(
-          videoSource: _sourceUrl!,
-          audioSource: null,
-          videoTrack: _sourceTrack,
-        ),
+        _networkAudioSource(_sourceUrl!, _sourceTrack),
         position: start,
         userAgent: _sourceUa,
         referer: _sourceReferer ?? '',
@@ -553,6 +616,54 @@ class AudioController extends GetxController
     if (!audioFocusAvailable || !identical(player, current)) return;
     await current.setRate(speed);
     await setAudioDucked(audioSessionHandler?.isDucked(this) ?? false);
+  }
+
+  Future<NetworkSource?> _refreshOfficialSource(NetworkSource source) async {
+    final revision = _sourceRevision;
+    final currentPlayer = player;
+    final track = source.videoTrack;
+    bool current() =>
+        _currentSource(revision) &&
+        identical(player, currentPlayer) &&
+        _sourceUrl == source.videoSource;
+    if (!current() || track == null) return null;
+    final web = await _ugcAudioSource();
+    if (!current()) return null;
+    final webAudio = web?.dash?.audio
+        ?.where((item) => item.id == track.id)
+        .firstOrNull;
+    if (webAudio != null) return _httpAudioSource(webAudio);
+    final result = await AudioGrpc.audioPlayUrl(
+      itemType: itemType,
+      oid: oid,
+      subId: subId,
+    );
+    if (!current()) return null;
+    if (result case Success(:final response)) {
+      final playInfo = response.playerInfo.values.firstOrNull;
+      final audio = playInfo?.playDash.audio
+          .where((item) => item.id == track.id)
+          .firstOrNull;
+      if (audio == null) return null;
+      final url = VideoUtils.getCdnUrl(audio.playUrls);
+      final next = _networkAudioSource(
+        url,
+        DashTrack(
+          source: url,
+          id: audio.id,
+          bandwidth: audio.bandwidth,
+          urls: audio.playUrls,
+        ),
+      );
+      return next;
+    }
+    return null;
+  }
+
+  void _acceptRefreshedSource(NetworkSource previous, NetworkSource next) {
+    if (_closing || isClosed || _sourceUrl != previous.videoSource) return;
+    _sourceUrl = next.videoSource;
+    _sourceTrack = next.videoTrack;
   }
 
   Future<PlatformPlayer> _switchToMpv(
@@ -666,6 +777,11 @@ class AudioController extends GetxController
     _subscriptions = [
       stream.error.listen((error) {
         if (_closing || _opening || !identical(player, current)) return;
+        if (error == 'official:resource_unavailable') {
+          _wantsPlay = false;
+          _reportError(error);
+          return;
+        }
         if (current is OfficialPlayer) {
           unawaited(
             _enqueue(() async {

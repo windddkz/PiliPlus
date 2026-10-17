@@ -198,19 +198,7 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                 data.putBoolean("audioOnly", Boolean.TRUE.equals(call.argument("audioOnly")));
                 data.putBoolean("flipX", Boolean.TRUE.equals(call.argument("flipX")));
                 data.putBoolean("flipY", Boolean.TRUE.equals(call.argument("flipY")));
-                for (String key : new String[]{"source", "audio", "userAgent", "referer"}) {
-                    String value = call.argument(key); if (value != null) data.putString(key, value);
-                }
-                for(String key:new String[]{"sourceTrack","audioTrack"}) {
-                    Object raw=call.argument(key);if(raw==null)continue;
-                    if(!(raw instanceof Map<?,?>))throw new IllegalArgumentException("Invalid stream metadata");
-                    Map<?,?> fields=(Map<?,?>)raw;
-                    OfficialStream track=new OfficialStream(data.getString(key.equals("sourceTrack")?"source":"audio"),
-                        fields.get("source"),fields.get("id"),fields.get("bandwidth"),fields.get("backups"));
-                    Bundle info=new Bundle();info.putString("source",track.source);info.putInt("id",track.id);
-                    info.putInt("bandwidth",track.bandwidth);info.putStringArrayList("backups",new ArrayList<>(track.backups));
-                    data.putBundle(key,info);
-                }
+                putSources(call,data);
                 data.putLong("position", number(call, "position", 0).longValue());
                 data.putLong("load", number(call, "load", 1).longValue());
                 data.putFloat("speed", number(call, "speed", 1).floatValue());
@@ -238,6 +226,12 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                     data.putBundle("loudnessScenes", scenes);
                 }
                 data.putBoolean("play", Boolean.TRUE.equals(call.argument("play")));
+                break;
+            case "resourceUpdate":
+                data.putLong("load",number(call,"load",-1).longValue());
+                data.putLong("requestId",number(call,"requestId",-1).longValue());
+                data.putBoolean("available",Boolean.TRUE.equals(call.argument("available")));
+                if(data.getBoolean("available"))putSources(call,data);
                 break;
             case "seek": data.putLong("position", number(call, "position", -1).longValue()); break;
             case "speed": data.putFloat("speed", number(call, "speed", Float.NaN).floatValue()); break;
@@ -267,6 +261,21 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
             waitingOpen=new WaitingOpen(data,result);ui.postDelayed(waitingOpen.timeout,20000);flushWaitingOpen();return;
         }
         send(call.method, data, result, null);
+    }
+    private static void putSources(MethodCall call,Bundle data) {
+                for (String key : new String[]{"source", "audio", "userAgent", "referer"}) {
+                    String value = call.argument(key); if (value != null) data.putString(key, value);
+                }
+                for(String key:new String[]{"sourceTrack","audioTrack"}) {
+                    Object raw=call.argument(key);if(raw==null)continue;
+                    if(!(raw instanceof Map<?,?>))throw new IllegalArgumentException("Invalid stream metadata");
+                    Map<?,?> fields=(Map<?,?>)raw;
+                    OfficialStream track=new OfficialStream(data.getString(key.equals("sourceTrack")?"source":"audio"),
+                        fields.get("source"),fields.get("id"),fields.get("bandwidth"),fields.get("backups"));
+                    Bundle info=new Bundle();info.putString("source",track.source);info.putInt("id",track.id);
+                    info.putInt("bandwidth",track.bandwidth);info.putStringArrayList("backups",new ArrayList<>(track.backups));
+                    data.putBundle(key,info);
+                }
     }
     // Map.of requires API 30; this bridge supports Android 26 and above.
     private static Map<String, Object> values(Object... entries) {

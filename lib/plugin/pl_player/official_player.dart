@@ -26,6 +26,15 @@ class OfficialPlayer extends PlatformPlayer {
   late StreamSubscription<dynamic> _events;
   int session = 0;
   int _load = 0;
+  NetworkSource? _networkSource;
+  bool _audioOnly = false;
+  int? _refreshRequest;
+  int _lastRefreshRequest = 0;
+  (int, NetworkSource, NetworkSource)? _pendingResource;
+  int _refreshAttempts = 0;
+  Duration _refreshPosition = Duration.zero;
+  static bool isResourceFailure(Object error) =>
+      error is PlatformException && error.code == 'resource_unavailable';
   Completer<void>? _preparing;
   bool _nativePrepared = false;
   bool initialSeekTimedOut = false;
@@ -165,6 +174,13 @@ class OfficialPlayer extends PlatformPlayer {
       throw StateError('An official source is already preparing');
     }
     ++_load;
+    _networkSource = source is NetworkSource ? source : null;
+    _audioOnly = audioOnly;
+    _refreshRequest = null;
+    _lastRefreshRequest = 0;
+    _pendingResource = null;
+    _refreshAttempts = 0;
+    _refreshPosition = position ?? Duration.zero;
     _cancelSeek(StateError('Source changed during seek'));
     _seekTail = Future<void>.value();
     _seekUncertain = false;
@@ -225,6 +241,38 @@ class OfficialPlayer extends PlatformPlayer {
     if (raw.containsKey('load') && raw['load'] != _load) return;
     final event = Map<String, dynamic>.from(raw);
     switch (event['event']) {
+      case 'resource_refresh':
+        final request = event['requestId'];
+        if (request is int &&
+            request > _lastRefreshRequest &&
+            _disposing == null) {
+          _lastRefreshRequest = request;
+          unawaited(_refreshSource(request, _load));
+        }
+      case 'resource_updated':
+        final pending = _pendingResource;
+        if (pending != null &&
+            event['requestId'] == pending.$1 &&
+            _disposing == null) {
+          _pendingResource = null;
+          _networkSource = pending.$3;
+          pending.$2.onRefreshed?.call(pending.$2, pending.$3);
+        }
+      case 'resource_error':
+        _nativePrepared = false;
+        _refreshRequest = null;
+        _pendingResource = null;
+        state.playing = false;
+        state.buffering = false;
+        playingController.add(false);
+        bufferingController.add(false);
+        final error = PlatformException(code: 'resource_unavailable');
+        _cancelSeek(error);
+        if (_preparing case final pending? when !pending.isCompleted) {
+          pending.completeError(error);
+        } else {
+          errorController.add('official:resource_unavailable');
+        }
       case 'prepared':
         _nativePrepared = true;
         _finishPreparation();
@@ -332,6 +380,55 @@ class OfficialPlayer extends PlatformPlayer {
         bufferController.add(state.buffer);
         sizeController.add((state.width, state.height));
         audioParamsController.add(state.audioParams);
+    }
+  }
+
+  Future<void> _refreshSource(int request, int load) async {
+    _refreshRequest = request;
+    bool current() =>
+        !_disposed &&
+        _disposing == null &&
+        load == _load &&
+        _refreshRequest == request;
+    NetworkSource? replacement;
+    final source = _networkSource;
+    try {
+      if (state.position > _refreshPosition) _refreshAttempts = 0;
+      _refreshPosition = state.position;
+      if (++_refreshAttempts <= 3) {
+        if (source != null) replacement = await source.refresh?.call(source);
+      }
+    } catch (_) {
+      // Signed URLs and request exceptions must not be exposed in playback errors.
+    }
+    if (!current()) return;
+    try {
+      if (source != null && replacement != null) {
+        _pendingResource = (request, source, replacement);
+      }
+      await _send('resourceUpdate', {
+        'load': load,
+        'requestId': request,
+        'available': replacement != null,
+        if (replacement != null) ...{
+          'source': _audioOnly && replacement.audioSource != null
+              ? replacement.audioSource
+              : replacement.videoSource,
+          if (!_audioOnly) 'audio': replacement.audioSource,
+          'sourceTrack': _audioOnly && replacement.audioSource != null
+              ? replacement.audioTrack?.forSource(replacement.audioSource)
+              : replacement.videoTrack?.forSource(replacement.videoSource),
+          if (!_audioOnly)
+            'audioTrack': replacement.audioTrack?.forSource(
+              replacement.audioSource,
+            ),
+        },
+      });
+    } catch (_) {
+      if (_pendingResource?.$1 == request) _pendingResource = null;
+      // A canceled or expired native request must not affect the next source.
+    } finally {
+      if (current()) _refreshRequest = null;
     }
   }
 

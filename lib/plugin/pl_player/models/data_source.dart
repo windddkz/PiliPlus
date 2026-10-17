@@ -14,12 +14,16 @@ sealed class DataSource {
 class NetworkSource extends DataSource {
   final DashTrack? videoTrack;
   final DashTrack? audioTrack;
+  final Future<NetworkSource?> Function(NetworkSource source)? refresh;
+  final void Function(NetworkSource previous, NetworkSource next)? onRefreshed;
 
   NetworkSource({
     required super.videoSource,
     required super.audioSource,
     this.videoTrack,
     this.audioTrack,
+    this.refresh,
+    this.onRefreshed,
   });
 }
 

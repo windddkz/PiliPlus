@@ -39,7 +39,8 @@ final class OfficialRuntime {
         if(hdrSurface!=null)hdrSurface.update(outputParent,windowWidth,windowHeight,displayWidth,displayHeight,openRequest);
     }
     private Bundle openRequest;
-    private long generation, load;
+    private volatile long generation, load;
+    private final OfficialResourceRefresh<Bundle> resourceRefresh=new OfficialResourceRefresh<>();
     private boolean initAttempted, prepared, graphActive, dspActive;
     private volatile boolean wantedPlaying;
     private float speed = 1, volume = 1;
@@ -155,6 +156,10 @@ final class OfficialRuntime {
             }
         };
         try {
+            stage("foundation");
+            invoke(cls("com.bilibili.lib.foundation.Foundation"),"init",context,
+                context.getSharedPreferences("official_runtime_foundation",Context.MODE_PRIVATE),
+                construct("com.bilibili.lib.foundation.Foundation$Configuration"));
             stage("library_load");
             invoke(cls("com.bilibili.ijk.utils.IJKLibLoader").getField("INSTANCE").get(null),"ensureLoaded");
             Object logger=construct("com.bilibili.ijk.utils.IJKLog");invoke(logger,"initLogger",false,null,2);
@@ -343,6 +348,8 @@ final class OfficialRuntime {
             Object render=cls("com.bilibili.ijk.player.RenderPath").getField("Direct").get(null);
             Object descriptor=construct("com.bilibili.ijk.player.PlayerItem",asset,0L,false,0,null,null,0,0,render,254,null);
             item=construct("com.bilibili.ijk.player.AndroidNativePlayerItem",descriptor);
+            resourceRefresh.open();
+            invoke(item,"setResourceUpdateListener",resourceListener(token,new Bundle(request)));
             if(!Boolean.TRUE.equals(invoke(player,"switchItem",item)))throw new IOException("switchItem rejected");
             route.start();describeRoute("route_selected");
             worker.postDelayed(()->run(token,()->{if(!prepared)throw new IOException("Preparation timeout");}),20000);
@@ -350,6 +357,67 @@ final class OfficialRuntime {
     }
     private static OfficialStream streamInfo(Bundle info,String source) {
         return info==null?null:new OfficialStream(source,info.get("source"),info.get("id"),info.get("bandwidth"),info.get("backups"));
+    }
+    void cancelResourceRefresh() { resourceRefresh.cancel(); }
+    boolean resourceUpdate(Bundle data) {
+        return data.getLong("load",-1)==load && resourceRefresh.complete(data.getLong("requestId",-1),data);
+    }
+    private Object resourceListener(long token,Bundle original) throws Exception {
+        return Proxy.newProxyInstance(loader,new Class<?>[]{cls("com.bilibili.ijk.callback.OnResourceUpdateListener")},(proxy,method,args)->{
+            switch(method.getName()) {
+                case "toString":return "PiliPlusResourceUpdate";
+                case "hashCode":return System.identityHashCode(proxy);
+                case "equals":return proxy==args[0];
+                case "onUpdate":break;
+                default:throw new UnsupportedOperationException(method.getName());
+            }
+            if(token!=generation || !resourceRefresh.isOpen())return null;
+            try {
+                Bundle next=resourceRefresh.await(20000,id->worker.post(()->run(token,()->{
+                    Bundle event=new Bundle();event.putString("event","resource_refresh");event.putLong("requestId",id);emit(event);
+                })));
+                if(token!=generation || !resourceRefresh.isOpen())return null;
+                if(next==null || !next.getBoolean("available"))throw new IOException("Resource refresh unavailable");
+                Object old=invoke(args[0],"getCurrentAsset");
+                Object replacement=updatedAsset(old,original,next);
+                if(token!=generation || !resourceRefresh.isOpen())return null;
+                worker.post(()->run(token,()->{
+                    for(String key:new String[]{"source","audio"})openRequest.putString(key,next.getString(key));
+                    for(String key:new String[]{"sourceTrack","audioTrack"})openRequest.putBundle(key,next.getBundle(key));
+                    Bundle event=new Bundle();event.putString("event","resource_updated");event.putLong("requestId",next.getLong("requestId"));emit(event);
+                }));
+                return replacement;
+            } catch(Exception error) {
+                worker.post(()->run(token,()->{
+                    // Returning null alone tells the original DASH director to retry the old URLs.
+                    release();
+                    Bundle event=new Bundle();event.putString("event","resource_error");event.putString("error","resource_unavailable");emit(event);
+                }));
+                return null;
+            }
+        });
+    }
+    private Object updatedAsset(Object old,Bundle original,Bundle next) throws Exception {
+        OfficialStream source=streamInfo(next.getBundle("sourceTrack"),next.getString("source"));
+        OfficialStream before=streamInfo(original.getBundle("sourceTrack"),original.getString("source"));
+        if(source==null || before==null || source.id!=before.id)throw new IOException("Refresh changed source track");
+        String ua=original.getString("userAgent","PiliPlus"),referer=original.getString("referer","https://www.bilibili.com/");
+        DashSource video=DashSource.probe(source.source,source.backups,ua,referer);
+        Object scheme=invoke(old,"getScheme"),options=invoke(old,"getOption");
+        if(old.getClass().getName().endsWith("$Dash")) {
+            OfficialStream audio=streamInfo(next.getBundle("audioTrack"),next.getString("audio"));
+            OfficialStream prior=streamInfo(original.getBundle("audioTrack"),original.getString("audio"));
+            if(audio==null || prior==null || audio.id!=prior.id)throw new IOException("Refresh changed audio track");
+            DashSource sound=DashSource.probe(audio.source,audio.backups,ua,referer);
+            Object oldVideo=((List<?>)invoke(old,"getVideoStreamList")).get(0),oldAudio=((List<?>)invoke(old,"getAudioStreamList")).get(0);
+            Object newVideo=dashStream(video,0,source.id,source),newAudio=dashStream(sound,1,audio.id,audio);
+            if(!invoke(oldVideo,"getCodecId").equals(invoke(newVideo,"getCodecId")) || !invoke(oldAudio,"getCodecId").equals(invoke(newAudio,"getCodecId")))
+                throw new IOException("Refresh changed codec");
+            return construct("com.bilibili.ijk.media.MediaAsset$Dash",audio.id,source.id,Collections.singletonList(newVideo),Collections.singletonList(newAudio),scheme,options,null);
+        }
+        if(!old.getClass().getName().endsWith("$Normal") || next.getString("audio")!=null)
+            throw new IOException("Unsupported resource refresh");
+        return construct("com.bilibili.ijk.media.MediaAsset$Normal",video.url,source.alternativesFor(video.url),scheme,options,null);
     }
     private Object dashStream(DashSource source,int mediaType,int qn,OfficialStream track) throws Exception {
         Object codec=cls("com.bilibili.ijk.media.CodecID").getField(source.codec).get(null);
@@ -439,6 +507,7 @@ final class OfficialRuntime {
         if(player!=null)invoke(player,"setVolume",value);volume=value;
     }
     void release() throws Exception {
+        cancelResourceRefresh();
         ++generation;prepared=false;wantedPlaying=false;
         if(route!=null){route.stop();route=null;}
         if(player!=null){invoke(player,"release");player=null;}

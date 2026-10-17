@@ -1093,6 +1093,7 @@ class PlPlayerController
         }
       } catch (error) {
         if (_playerCount == 0) return;
+        if (OfficialPlayer.isResourceFailure(error)) rethrow;
         await _switchToMpv('官方开片失败：${OfficialPlayer.failureCode(error)}');
       }
       return;
@@ -1354,6 +1355,11 @@ class PlPlayerController
           return;
         }
         if (player is OfficialPlayer) {
+          if (event == 'official:resource_unavailable') {
+            dataStatus.value = DataStatus.error;
+            SmartDialog.showToast('播放地址失效，重新取流失败，请重试');
+            return;
+          }
           unawaited(() async {
             try {
               await _fallbackToMpv('官方播放进程异常', expected: player);

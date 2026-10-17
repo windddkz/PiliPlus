@@ -13,7 +13,7 @@ public final class OfficialPlaybackService extends Service {
     private OfficialRuntime runtime;
     private Messenger client;
     private Surface surface;
-    private long session;
+    private volatile long session;
     private volatile IBinder owner;
     private final IBinder.DeathRecipient ownerDeath = () -> android.os.Process.killProcess(android.os.Process.myPid());
 
@@ -24,6 +24,16 @@ public final class OfficialPlaybackService extends Service {
             return true;
         }
         if (message.what != COMMAND || message.replyTo == null) return true;
+        Bundle data=message.getData();
+        if(owner!=null && owner.equals(message.replyTo.getBinder()) && session==data.getLong("session")) {
+            String op=data.getString("op","");
+            // Native release can join an IO callback; unblock it before queuing release.
+            if(op.equals("close") || op.equals("open"))runtime.cancelResourceRefresh();
+            if(op.equals("resourceUpdate")) {
+                Bundle reply=new Bundle();reply.putBoolean("ok",runtime.resourceUpdate(data));
+                reply.putString("error","stale_resource_request");send(REPLY,message.arg1,reply);return true;
+            }
+        }
         Message copy = Message.obtain(message);
         worker.post(() -> dispatch(copy));
         return true;

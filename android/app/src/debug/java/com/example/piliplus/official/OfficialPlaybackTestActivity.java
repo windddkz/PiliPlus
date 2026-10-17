@@ -122,6 +122,21 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
     }
     private void acceptEvent(Bundle data) {
         String event=data.getString("event","unknown");record(event,data);
+        if(event.equals("resource_refresh") && getIntent().getBooleanExtra("probeFallback",false)) {
+            String refresh=getIntent().getStringExtra("resourceRefresh");
+            if(!"wait".equals(refresh)) {
+                Bundle reply=new Bundle();reply.putLong("load",data.getLong("load"));reply.putLong("requestId",data.getLong("requestId"));
+                reply.putBoolean("available","fresh".equals(refresh) || "mismatch".equals(refresh));
+                if(reply.getBoolean("available"))for(String kind:new String[]{"video","audio"}) {
+                    String url="http://127.0.0.1:17676/fresh-"+kind;
+                    reply.putString(kind.equals("video")?"source":"audio",url);
+                    Bundle track=new Bundle();track.putString("source",url);track.putInt("id",kind.equals("video")?80:"mismatch".equals(refresh)?30299:30280);
+                    track.putInt("bandwidth",0);track.putStringArrayList("backups",new ArrayList<>());
+                    reply.putBundle(kind.equals("video")?"sourceTrack":"audioTrack",track);
+                }
+                send("resourceUpdate",reply,()->record("resource_reply_sent",null));
+            }
+        }
         if(event.equals("completed"))ui.postDelayed(()->{saveTextureTrace(true);if(getIntent().getBooleanExtra("videoTrace",false))send("close",new Bundle(),()->record("probe_released",null));},500);
         if(event.equals("seek_complete") && resumeAfterSeek){
             resumeAfterSeek=false;
