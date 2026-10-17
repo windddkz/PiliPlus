@@ -1135,6 +1135,79 @@
         "lib/plugin/pl_player/view/view.dart",
         "validation/official_seek_test.dart"
       ]
+    },
+    {
+      "commit": "f36f1796319ea7b4a1279dac52e19beaa9376713",
+      "title": "feat(preload): retain thirty items with priority-aware eviction",
+      "source_candidate": 331,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialMediaCache.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPreloadCache.java",
+        "android/validation/OfficialMediaCacheCheck.java",
+        "android/validation/OfficialPreloadCacheTest.java"
+      ]
+    },
+    {
+      "commit": "cc08636d3c686e402bee19841e35087bc2819e9c",
+      "title": "feat(preload): schedule visible candidates across video feeds",
+      "source_candidate": 331,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlaybackService.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialPreloadQueueCheck.java",
+        "lib/common/widgets/video_preload_scope.dart",
+        "lib/http/preload_queue.dart",
+        "lib/http/video.dart",
+        "lib/models/common/home_tab_type.dart",
+        "lib/pages/hot/view.dart",
+        "lib/pages/rank/view.dart",
+        "lib/pages/rank/zone/view.dart",
+        "lib/pages/rcmd/view.dart",
+        "lib/pages/video/related/view.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/official_player_test.dart",
+        "validation/preload_queue_test.dart"
+      ]
+    },
+    {
+      "commit": "31c5fc0bb23b9fff3db079b6912de15311ba4fde",
+      "title": "fix(preload): invalidate stored positions when media cache is rewritten",
+      "source_candidate": 331,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialPreloadQueueCheck.java",
+        "validation/play_url_prefetch_test.dart"
+      ]
+    },
+    {
+      "commit": "e134c8a58a0c97f21707421be66acdc58ec5ce46",
+      "title": "fix(preload): retain watched snapshots during recommendation churn",
+      "source_candidate": 333,
+      "files": [
+        "lib/http/play_url_prefetch.dart",
+        "validation/play_url_prefetch_test.dart"
+      ]
+    },
+    {
+      "commit": "9c1c85e8365238889706809a69c6462279c32060",
+      "title": "fix(preload): serialize cache writers when resume positions change",
+      "source_candidate": 335,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPreloadCache.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialPreloadCacheTest.java",
+        "android/validation/OfficialPreloadQueueCheck.java"
+      ]
+    },
+    {
+      "commit": "6c25c8a86b98d2fc5c2f3a7433da66b53aaa8c8a",
+      "title": "fix(preload): bound history protection so new page snapshots can enter",
+      "source_candidate": 337,
+      "files": [
+        "lib/http/play_url_prefetch.dart",
+        "validation/play_url_prefetch_test.dart"
+      ]
     }
   ]
 }
