@@ -93,21 +93,23 @@ void main() {
       expect(tester.state(find.byType(PlatformViewLink)), same(state));
       final top = await layout(BoxFit.contain, alignment: Alignment.topCenter);
       expect(top.top, contain.top - 75);
-      await tester.runAsync(() => messenger.handlePlatformMessage(
-        events.name,
-        const StandardMethodCodec().encodeSuccessEnvelope({
-          'session': 7,
-          'event': 'state',
-          'position': 0,
-          'duration': 1000,
-          'playing': false,
-          'speed': 1,
-          'width': 100,
-          'height': 50,
-          'bufferedPercent': 100,
-        }),
-        (_) {},
-      ));
+      await tester.runAsync(
+        () => messenger.handlePlatformMessage(
+          events.name,
+          const StandardMethodCodec().encodeSuccessEnvelope({
+            'session': 7,
+            'event': 'state',
+            'position': 0,
+            'duration': 1000,
+            'playing': false,
+            'speed': 1,
+            'width': 100,
+            'height': 50,
+            'bufferedPercent': 100,
+          }),
+          (_) {},
+        ),
+      );
       await tester.pump();
       expect((await layout(BoxFit.scaleDown)).size, const Size(100, 50));
       await tester.pumpWidget(const SizedBox.shrink());

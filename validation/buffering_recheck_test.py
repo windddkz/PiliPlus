@@ -1,13 +1,29 @@
 """Exercise the production buffering gate with known and unrelated native objects."""
+
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
-source = (Path(__file__).resolve().parents[1] / 'android/official_audio/graph_adapter.c').read_text()
-gate = source.split('static SourceResult adapted(void *context){', 1)[1].split('    int64_t previous_pts=', 1)[0]
-gate = gate.replace('((int (*)(void *))(base+0x139d80))(checker)', 'is_buffering(checker)')
-gate = gate.replace('((int (*)(void *))(base+0x139d88))(checker)', 'check(checker)')
-harness = r'''
+source = (
+    Path(__file__).resolve().parents[1] / "android/official_audio/graph_adapter.c"
+).read_text()
+gate = re.split(
+    r"static SourceResult adapted\(void \*context\)\s*\{", source, maxsplit=1
+)[1]
+gate = re.split(r"int64_t previous_pts\s*=", gate, maxsplit=1)[0]
+gate = re.sub(
+    r"\(\(int\s*\(\*\)\(void \*\)\)\(base\s*\+\s*0x139d80\)\)\(checker\)",
+    "is_buffering(checker)",
+    gate,
+)
+gate = re.sub(
+    r"\(\(int\s*\(\*\)\(void \*\)\)\(base\s*\+\s*0x139d88\)\)\(checker\)",
+    "check(checker)",
+    gate,
+)
+harness = (
+    r"""
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -19,7 +35,9 @@ static uintptr_t context[16],listener[16],checker[16],listener_vtable[16],checke
 static int is_buffering(void *p){assert(p==checker);queries++;return waiting;}
 static int check(void *p){assert(p==checker);checks++;return 0;}
 static void recheck(void *context){
-''' + gate + r'''
+"""
+    + gate
+    + r"""
 }
 int main(void){
     recheck(context);assert(!queries&&!checks);
@@ -35,9 +53,13 @@ int main(void){
     waiting=0;recheck(context);assert(queries==3&&checks==1);
     puts("Production buffering gate: null/foreign objects, ready/waiting transitions passed");
 }
-'''
-with tempfile.TemporaryDirectory(prefix='piliplus-buffering-') as directory:
+"""
+)
+with tempfile.TemporaryDirectory(prefix="piliplus-buffering-") as directory:
     p = Path(directory)
-    (p/'test.c').write_text(harness)
-    subprocess.run(['cc', '-Wall', '-Wextra', '-Werror', str(p/'test.c'), '-o', str(p/'test')], check=True)
-    subprocess.run([str(p/'test')], check=True)
+    (p / "test.c").write_text(harness)
+    subprocess.run(
+        ["cc", "-Wall", "-Wextra", "-Werror", str(p / "test.c"), "-o", str(p / "test")],
+        check=True,
+    )
+    subprocess.run([str(p / "test")], check=True)

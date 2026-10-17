@@ -1,12 +1,14 @@
 """Compile the production reset with mock original lifecycle APIs and injected failures."""
+
 from pathlib import Path
 import subprocess
 import tempfile
 
 repo = Path(__file__).resolve().parents[1]
-header = repo / 'android/official_audio/decoder_reset.h'
-include = repo.parent / 'execution/toolchain/ffmpeg-source/ffmpeg-7.1.1'
-harness = r'''
+header = repo / "android/official_audio/decoder_reset.h"
+include = repo.parent / "execution/toolchain/ffmpeg-source/ffmpeg-7.1.1"
+harness = (
+    r"""
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -29,7 +31,11 @@ static void release_frame(void *p){
     for(size_t i=8;i<=0x20;i+=8)if(FIELD(p,i,void *)){free(FIELD(p,i,void *));allocated--;}
     free(p);released++;
 }
-''' + '#include "' + str(header) + '"\n' + r'''
+"""
+    + '#include "'
+    + str(header)
+    + '"\n'
+    + r"""
 void graph_make_decoder(void **out,uintptr_t address){
     assert(address==base+0x196854);
     *out=mode==1?NULL:calloc(1,56);
@@ -85,9 +91,26 @@ int main(void){
     }
     puts("HE/HEv2 reset ownership, 40 repeated resets, other codecs passthrough, factory/Open/resource/format failures preserve live object: passed");
 }
-'''
-with tempfile.TemporaryDirectory(prefix='piliplus-decoder-reset-') as directory:
+"""
+)
+with tempfile.TemporaryDirectory(prefix="piliplus-decoder-reset-") as directory:
     p = Path(directory)
-    (p/'test.c').write_text(harness)
-    subprocess.run(['cc','-O1','-g','-Wall','-Wextra','-Werror','-I',str(include),str(p/'test.c'),'-lpthread','-o',str(p/'test')],check=True)
-    subprocess.run([str(p/'test')],check=True)
+    (p / "test.c").write_text(harness)
+    subprocess.run(
+        [
+            "cc",
+            "-O1",
+            "-g",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-I",
+            str(include),
+            str(p / "test.c"),
+            "-lpthread",
+            "-o",
+            str(p / "test"),
+        ],
+        check=True,
+    )
+    subprocess.run([str(p / "test")], check=True)

@@ -1,12 +1,18 @@
 """Check rate rejection and close synchronization in the production observer."""
+
 from pathlib import Path
 import subprocess
 import tempfile
 
 repo = Path(__file__).resolve().parents[1]
-source = (repo / 'android/official_audio/output_observer.h').read_text()
-functions = source[source.index('static int observe_output_rate('):source.index('static int replace_output_track(')]
-harness = r'''
+source = (repo / "android/official_audio/output_observer.h").read_text()
+functions = source[
+    source.index("static int observe_output_rate(") : source.index(
+        "static int replace_output_track("
+    )
+]
+harness = (
+    r"""
 #include <assert.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -21,7 +27,9 @@ static int close_engine(void *p){assert(p==&engine && output_engine==0);atomic_s
 static int (*output_rate_original)(void *,double)=rate;
 static int (*output_close_original)(void *)=close_engine;
 static void clear_output_track(void){cleared++;}
-''' + functions + r'''
+"""
+    + functions
+    + r"""
 static void *close_thread(void *p){atomic_store(&closing,1);assert(observe_output_close(p)==17);return 0;}
 int main(void){
     result_code=-22;
@@ -38,10 +46,26 @@ int main(void){
     assert(atomic_load(&closed) && !output_engine && output_rate_error==0 && cleared==1);
     return 0;
 }
-'''
-with tempfile.TemporaryDirectory(prefix='pili-output-test-') as directory:
-    c=Path(directory)/'test.c';binary=Path(directory)/'test'
+"""
+)
+with tempfile.TemporaryDirectory(prefix="pili-output-test-") as directory:
+    c = Path(directory) / "test.c"
+    binary = Path(directory) / "test"
     c.write_text(harness)
-    subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-pthread',str(c),'-o',str(binary)],check=True)
-    subprocess.run([str(binary)],check=True)
-print('Native rate errors preserved; output observer invalidated before original close')
+    subprocess.run(
+        [
+            "cc",
+            "-std=c11",
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-pthread",
+            str(c),
+            "-o",
+            str(binary),
+        ],
+        check=True,
+    )
+    subprocess.run([str(binary)], check=True)
+print("Native rate errors preserved; output observer invalidated before original close")

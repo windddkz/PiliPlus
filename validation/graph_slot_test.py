@@ -1,14 +1,24 @@
 """Exercise the production single-slot transaction and its protection failure paths."""
+
 from pathlib import Path
 import subprocess
 import tempfile
 
 repo = Path(__file__).resolve().parents[1]
-source = (repo/'android/official_audio/graph_adapter.c').read_text()
-function = source[source.index('static int replace(uintptr_t *slot,'):source.index('static void fail(')]
-assert function.count('static int replace(') == 1
-stretcher = source[source.index('static void (*soundtouch_constructor)'):source.index('static int replace_stretcher(')]
-harness = r'''
+source = (repo / "android/official_audio/graph_adapter.c").read_text()
+function = source[
+    source.index("static int replace(uintptr_t *slot,") : source.index(
+        "static void fail("
+    )
+]
+assert function.count("static int replace(") == 1
+stretcher = source[
+    source.index("static void (*soundtouch_constructor)") : source.index(
+        "static int replace_stretcher("
+    )
+]
+harness = (
+    r"""
 #define _GNU_SOURCE
 #include <assert.h>
 #include <stdint.h>
@@ -25,10 +35,14 @@ static int injected(void *p,size_t n,int prot) {
     return mprotect(p,n,prot);
 }
 #define mprotect injected
-''' + function + r'''
+"""
+    + function
+    + r"""
 #undef mprotect
 #define __android_log_print(...) ((void)0)
-''' + stretcher + r'''
+"""
+    + stretcher
+    + r"""
 static int phase, setting_ok;
 static char object;
 static void ctor(void *p) { assert(p==&object && phase==0);phase=1; }
@@ -68,9 +82,22 @@ int main(void) {
     assert(*p==11);readonly(p);assert(!munmap(p,(size_t)n));
     puts("constructor order, setting failure, slot mismatch, install, restore, write denial, rollback, fatal protection failure passed");
 }
-'''
-with tempfile.TemporaryDirectory(prefix='piliplus-slot-test-') as directory:
+"""
+)
+with tempfile.TemporaryDirectory(prefix="piliplus-slot-test-") as directory:
     path = Path(directory)
-    (path/'test.c').write_text(harness)
-    subprocess.run(['cc', '-O2', '-Wall', '-Wextra', '-Werror', str(path/'test.c'), '-o', str(path/'test')], check=True)
-    subprocess.run([str(path/'test')], check=True)
+    (path / "test.c").write_text(harness)
+    subprocess.run(
+        [
+            "cc",
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            str(path / "test.c"),
+            "-o",
+            str(path / "test"),
+        ],
+        check=True,
+    )
+    subprocess.run([str(path / "test")], check=True)

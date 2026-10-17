@@ -12,8 +12,16 @@ static int original(void *d, void *p) {
     calls++;
     return return_code;
 }
-static unsigned valid(void *f) { assert(f == expected_filter); checks++; return validity; }
-static int close_filter(void *f) { assert(f == expected_filter); closes++; return 0; }
+static unsigned valid(void *f) {
+    assert(f == expected_filter);
+    checks++;
+    return validity;
+}
+static int close_filter(void *f) {
+    assert(f == expected_filter);
+    closes++;
+    return 0;
+}
 static void *reset(void **owner, void *value) {
     assert(owner == (void **)((char *)expected_decoder + 0x30));
     assert(*owner == expected_filter && value == NULL && closes == 1);
@@ -46,7 +54,8 @@ int main(void) {
             assert(closes == released && resets == released);
             assert(*owner == (released || state == 0 ? NULL : &filter));
             for (size_t i = 0; i < sizeof decoder; i++)
-                if (i < 0x30 || i >= 0x38) assert(decoder[i] == 0xa5);
+                if (i < 0x30 || i >= 0x38)
+                    assert(decoder[i] == 0xa5);
             if (released) {
                 assert(adaptive_flush(decoder, &state) == 0);
                 assert(closes == 1 && resets == 1 && checks == 1);

@@ -18,31 +18,44 @@ final class OfficialMediaCache {
     OfficialMediaCache(File root) throws IOException {
         this.root = root;
         Files.createDirectories(root.toPath());
-        if (!Files.isDirectory(root.toPath(), LinkOption.NOFOLLOW_LINKS)) throw new IOException("Invalid media cache root");
+        if (!Files.isDirectory(root.toPath(), LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("Invalid media cache root");
         // A new service owns no old items; recover files left by a terminated process.
-        if (OfficialRuntimeCache.prune(root, "0000000000000000000000000000000000000000000000000000000000000000").failedDirectories != 0) throw new IOException("Media cache cleanup failed");
+        if (OfficialRuntimeCache
+                        .prune(root,
+                                "0000000000000000000000000000000000000000000000000000000000000000")
+                        .failedDirectories
+                != 0)
+            throw new IOException("Media cache cleanup failed");
     }
 
     File acquire(long usableBytes) throws IOException {
         // Three preloads plus the current player, two tracks each; retain half of free space.
-        if (retained.size() >= 4 || usableBytes < MIN_FREE_BYTES || usableBytes / 2 < (retained.size() + 1) * 2 * TRACK_BYTES) return null;
-        File directory = new File(root, (UUID.randomUUID().toString() + UUID.randomUUID()).replace("-", ""));
+        if (retained.size() >= 4 || usableBytes < MIN_FREE_BYTES
+                || usableBytes / 2 < (retained.size() + 1) * 2 * TRACK_BYTES)
+            return null;
+        File directory =
+                new File(root, (UUID.randomUUID().toString() + UUID.randomUUID()).replace("-", ""));
         Files.createDirectory(directory.toPath());
         retained.add(directory);
         return directory;
     }
 
     void release(File directory) throws IOException {
-        if (!retained.contains(directory)) throw new IllegalArgumentException("Unowned media cache");
+        if (!retained.contains(directory))
+            throw new IllegalArgumentException("Unowned media cache");
         Path path = directory.toPath();
         if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
             try (DirectoryStream<Path> files = Files.newDirectoryStream(path)) {
-                for (Path file : files) Files.delete(file);
+                for (Path file : files)
+                    Files.delete(file);
             }
         }
         Files.deleteIfExists(path);
         retained.remove(directory);
     }
 
-    int retained() { return retained.size(); }
+    int retained() {
+        return retained.size();
+    }
 }

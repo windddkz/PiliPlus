@@ -15,27 +15,36 @@ public final class OfficialPlaybackService extends Service {
     private Surface surface;
     private volatile long session;
     private volatile IBinder owner;
-    private final IBinder.DeathRecipient ownerDeath = () -> android.os.Process.killProcess(android.os.Process.myPid());
+    private final IBinder.DeathRecipient ownerDeath =
+            () -> android.os.Process.killProcess(android.os.Process.myPid());
 
     private final Messenger inbox = new Messenger(new Handler(Looper.getMainLooper(), message -> {
-        if(message.what==TERMINATE_IDLE) {
-            if(owner==null)android.os.Process.killProcess(android.os.Process.myPid());
-            return true;
-        }
-        if (message.what == TERMINATE) {
-            if (owner != null && message.replyTo != null && owner.equals(message.replyTo.getBinder()))
+        if (message.what == TERMINATE_IDLE) {
+            if (owner == null)
                 android.os.Process.killProcess(android.os.Process.myPid());
             return true;
         }
-        if (message.what != COMMAND || message.replyTo == null) return true;
-        Bundle data=message.getData();
-        if(owner!=null && owner.equals(message.replyTo.getBinder()) && session==data.getLong("session")) {
-            String op=data.getString("op","");
+        if (message.what == TERMINATE) {
+            if (owner != null && message.replyTo != null
+                    && owner.equals(message.replyTo.getBinder()))
+                android.os.Process.killProcess(android.os.Process.myPid());
+            return true;
+        }
+        if (message.what != COMMAND || message.replyTo == null)
+            return true;
+        Bundle data = message.getData();
+        if (owner != null && owner.equals(message.replyTo.getBinder())
+                && session == data.getLong("session")) {
+            String op = data.getString("op", "");
             // Native release can join an IO callback; unblock it before queuing release.
-            if(op.equals("close") || op.equals("open"))runtime.cancelResourceRefresh();
-            if(op.equals("resourceUpdate")) {
-                Bundle reply=new Bundle();reply.putBoolean("ok",runtime.resourceUpdate(data));
-                reply.putString("error","stale_resource_request");send(REPLY,message.arg1,reply);return true;
+            if (op.equals("close") || op.equals("open"))
+                runtime.cancelResourceRefresh();
+            if (op.equals("resourceUpdate")) {
+                Bundle reply = new Bundle();
+                reply.putBoolean("ok", runtime.resourceUpdate(data));
+                reply.putString("error", "stale_resource_request");
+                send(REPLY, message.arg1, reply);
+                return true;
             }
         }
         Message copy = Message.obtain(message);
@@ -43,104 +52,186 @@ public final class OfficialPlaybackService extends Service {
         return true;
     }));
 
-    @Override public void onCreate() {
+    @Override
+    public void onCreate() {
         super.onCreate();
-        thread = new HandlerThread("official-player-control"); thread.start(); worker = new Handler(thread.getLooper());
-        runtime = new OfficialRuntime(getApplicationContext(), worker, event -> send(EVENT, 0, event));
+        thread = new HandlerThread("official-player-control");
+        thread.start();
+        worker = new Handler(thread.getLooper());
+        runtime = new OfficialRuntime(
+                getApplicationContext(), worker, event -> send(EVENT, 0, event));
     }
-    @Override public IBinder onBind(Intent intent) { return inbox.getBinder(); }
+    @Override
+    public IBinder onBind(Intent intent) {
+        return inbox.getBinder();
+    }
 
     private void send(int what, int id, Bundle data) {
-        if (client == null) return;
+        if (client == null)
+            return;
         data.putLong("session", session);
-        Message m = Message.obtain(null, what, id, 0); m.setData(data);
-        try { client.send(m); }
-        catch (RemoteException e) { android.os.Process.killProcess(android.os.Process.myPid()); }
+        Message m = Message.obtain(null, what, id, 0);
+        m.setData(data);
+        try {
+            client.send(m);
+        } catch (RemoteException e) {
+            android.os.Process.killProcess(android.os.Process.myPid());
+        }
     }
     private void setSurface(Surface next) throws Exception {
         runtime.surface(next);
-        if (surface != null) surface.release();
+        if (surface != null)
+            surface.release();
         surface = next;
     }
     private void dispatch(Message message) {
-        Bundle data = message.getData(); data.setClassLoader(getClassLoader());
+        Bundle data = message.getData();
+        data.setClassLoader(getClassLoader());
         String op = data.getString("op", "");
         try {
             if (owner == null) {
-                if (!op.equals("create") || data.getLong("session") <= 0) throw new IllegalArgumentException("Create first");
-                session = data.getLong("session"); client = message.replyTo; owner = client.getBinder();
+                if (!op.equals("create") || data.getLong("session") <= 0)
+                    throw new IllegalArgumentException("Create first");
+                session = data.getLong("session");
+                client = message.replyTo;
+                owner = client.getBinder();
                 owner.linkToDeath(ownerDeath, 0);
-            } else if (!owner.equals(message.replyTo.getBinder()) || session != data.getLong("session")) {
+            } else if (!owner.equals(message.replyTo.getBinder())
+                    || session != data.getLong("session")) {
                 throw new SecurityException("Stale session");
             }
             switch (op) {
-                case "create": break;
-                case "warmUp": runtime.initialize(); break;
-                case "preload": runtime.preload(data); break;
-                case "open": runtime.open(data, data.getBoolean("awaitOutput")?null:surface); break;
-                case "surface": runtime.outputWindow(data); setSurface(data.getParcelable("surface")); break;
-                case "play": runtime.play(true); break;
-                case "pause": runtime.play(false); break;
-                case "probeEndpoint": runtime.testEndpoint(data.getInt("endpoint")); break;
-                case "mirror": runtime.mirror(data); break;
-                case "viewport": runtime.viewport(data); break;
-                case "resize": runtime.outputWindow(data); runtime.resize(); break;
-                case "videoControl": runtime.videoControl(data); break;
-                case "seek": runtime.seek(data.getLong("position", -1)); break;
+                case "create":
+                    break;
+                case "warmUp":
+                    runtime.initialize();
+                    break;
+                case "preload":
+                    runtime.preload(data);
+                    break;
+                case "open":
+                    runtime.open(data, data.getBoolean("awaitOutput") ? null : surface);
+                    break;
+                case "surface":
+                    runtime.outputWindow(data);
+                    setSurface(data.getParcelable("surface"));
+                    break;
+                case "play":
+                    runtime.play(true);
+                    break;
+                case "pause":
+                    runtime.play(false);
+                    break;
+                case "probeEndpoint":
+                    runtime.testEndpoint(data.getInt("endpoint"));
+                    break;
+                case "mirror":
+                    runtime.mirror(data);
+                    break;
+                case "viewport":
+                    runtime.viewport(data);
+                    break;
+                case "resize":
+                    runtime.outputWindow(data);
+                    runtime.resize();
+                    break;
+                case "videoControl":
+                    runtime.videoControl(data);
+                    break;
+                case "seek":
+                    runtime.seek(data.getLong("position", -1));
+                    break;
                 case "screenshot": {
                     final long captureSession = session;
                     final int request = message.arg1;
                     runtime.screenshot(data.getLong("load", -1), path -> {
                         if (session != captureSession || owner == null) {
-                            if (path != null) new java.io.File(path).delete();
+                            if (path != null)
+                                new java.io.File(path).delete();
                             return;
                         }
-                        Bundle capture = new Bundle(); capture.putBoolean("ok", true);
-                        capture.putString("screenshot", path); send(REPLY, request, capture);
+                        Bundle capture = new Bundle();
+                        capture.putBoolean("ok", true);
+                        capture.putString("screenshot", path);
+                        send(REPLY, request, capture);
                     });
                     return;
                 }
-                case "speed": runtime.speed(data.getFloat("speed", Float.NaN)); break;
-                case "volume": runtime.volume(data.getFloat("volume", Float.NaN)); break;
-                case "close": runtime.close(); runtime.outputWindow(new Bundle()); setSurface(null); break;
-                default: throw new IllegalArgumentException("Unknown operation");
+                case "speed":
+                    runtime.speed(data.getFloat("speed", Float.NaN));
+                    break;
+                case "volume":
+                    runtime.volume(data.getFloat("volume", Float.NaN));
+                    break;
+                case "close":
+                    runtime.close();
+                    runtime.outputWindow(new Bundle());
+                    setSurface(null);
+                    break;
+                default:
+                    throw new IllegalArgumentException("Unknown operation");
             }
-            Bundle reply = new Bundle(); reply.putBoolean("ok", true); reply.putInt("pid", android.os.Process.myPid());
-            if(op.equals("warmUp"))reply.putStringArrayList("videoCodecs",runtime.preferredVideoCodecs());
+            Bundle reply = new Bundle();
+            reply.putBoolean("ok", true);
+            reply.putInt("pid", android.os.Process.myPid());
+            if (op.equals("warmUp"))
+                reply.putStringArrayList("videoCodecs", runtime.preferredVideoCodecs());
             send(REPLY, message.arg1, reply);
             if (op.equals("close")) {
-                owner.unlinkToDeath(ownerDeath, 0); owner = null; client = null; session = 0;
+                owner.unlinkToDeath(ownerDeath, 0);
+                owner = null;
+                client = null;
+                session = 0;
             }
         } catch (Throwable error) {
             Throwable cause = error;
-            while (cause instanceof java.lang.reflect.InvocationTargetException && cause.getCause() != null)
+            while (cause instanceof java.lang.reflect.InvocationTargetException
+                    && cause.getCause() != null)
                 cause = cause.getCause();
             if (com.example.piliplus.BuildConfig.DEBUG) {
                 if (cause instanceof LinkageError)
                     android.util.Log.e("PiliPlusOfficial", "Runtime class linkage failed", cause);
                 else {
-                    android.util.Log.e("PiliPlusOfficial", "Command " + op + " failed: " + cause.getClass().getName());
+                    android.util.Log.e("PiliPlusOfficial",
+                            "Command " + op + " failed: " + cause.getClass().getName());
                     for (StackTraceElement frame : cause.getStackTrace())
                         android.util.Log.e("PiliPlusOfficial", frame.toString());
                 }
             }
-            Bundle reply = new Bundle(); reply.putBoolean("ok", false);
-            reply.putString("error", runtime.failureCode(op,cause));
+            Bundle reply = new Bundle();
+            reply.putBoolean("ok", false);
+            reply.putString("error", runtime.failureCode(op, cause));
             // Reply to the caller directly; a stale caller must not receive another session's events.
             reply.putLong("session", data.getLong("session"));
-            Message out = Message.obtain(null, REPLY, message.arg1, 0); out.setData(reply);
-            try { message.replyTo.send(out); } catch (RemoteException ignored) { }
-        } finally { message.recycle(); }
+            Message out = Message.obtain(null, REPLY, message.arg1, 0);
+            out.setData(reply);
+            try {
+                message.replyTo.send(out);
+            } catch (RemoteException ignored) {
+            }
+        } finally {
+            message.recycle();
+        }
     }
-    @Override public boolean onUnbind(Intent intent) {
+    @Override
+    public boolean onUnbind(Intent intent) {
         // No client remains to own native audio; a stuck release must not outlive its owner.
         android.os.Process.killProcess(android.os.Process.myPid());
         return false;
     }
-    @Override public void onDestroy() {
-        if (worker != null) worker.post(() -> { try { runtime.release(); } catch (Exception ignored) { }
-            runtime.outputWindow(new Bundle());
-            if (surface != null) surface.release(); thread.quitSafely(); });
+    @Override
+    public void onDestroy() {
+        if (worker != null)
+            worker.post(() -> {
+                try {
+                    runtime.release();
+                } catch (Exception ignored) {
+                }
+                runtime.outputWindow(new Bundle());
+                if (surface != null)
+                    surface.release();
+                thread.quitSafely();
+            });
         super.onDestroy();
     }
 }
