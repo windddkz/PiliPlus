@@ -73,6 +73,11 @@ abstract final class VideoHttp {
           Pref.audioNormalization != '0' ||
           const {'normal', 'high_dynamic'}.contains(Pref.officialLoudnessMode),
     );
+    final retained = await _prefetch.retain(account, key);
+    if (retained != null) {
+      await _preloadMedia(retained, account);
+      return;
+    }
     await _prefetch.preload(account, key, () async {
       final cancel = CancelToken();
       try {
@@ -119,9 +124,8 @@ abstract final class VideoHttp {
       if (audio == null) return;
       final videoUrl = VideoUtils.getCdnUrl(selected.video.playUrls);
       final audioUrl = VideoUtils.getCdnUrl(audio.playUrls, isAudio: true);
-      final token =
+      final token = response.officialPreloadToken ??=
           '${DateTime.now().microsecondsSinceEpoch}_${++_preloadSerial}';
-      response.officialPreloadToken = token;
       final source = NetworkSource(
         videoSource: videoUrl,
         audioSource: audioUrl,

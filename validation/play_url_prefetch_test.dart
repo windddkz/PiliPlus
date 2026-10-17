@@ -16,6 +16,56 @@ void main() {
     cache = PlayUrlPrefetch(now: () => now);
   });
   test(
+    'visible candidate retains one response without downloading again',
+    () async {
+      final model = PlayUrlModel();
+      var loads = 0;
+      await cache.preload(account, key, () async {
+        loads++;
+        return Success(model);
+      });
+      for (var i = 0; i < 7; i++) {
+        now = now.add(const Duration(seconds: 10));
+        expect(await cache.retain(account, key), same(model));
+      }
+      expect(loads, 1);
+      now = now.add(const Duration(seconds: 30));
+      expect(await cache.retain(account, key), isNull);
+      expect(await cache.take(account, key), isNull);
+    },
+  );
+  test('retention never revives an expired URL or crosses accounts', () async {
+    final deadline =
+        now.add(const Duration(seconds: 25)).millisecondsSinceEpoch ~/ 1000;
+    final model = PlayUrlModel()
+      ..durl = [Durl(url: 'https://media.invalid/a?deadline=$deadline')];
+    await cache.preload(account, key, () async => Success(model));
+    now = now.add(const Duration(seconds: 10));
+    expect(await cache.retain(account, key), same(model));
+    now = now.add(const Duration(seconds: 10));
+    expect(await cache.retain(account, key), isNull);
+    expect(await cache.take(account, key), isNull);
+    await cache.preload(account, key, () async => Success(PlayUrlModel()));
+    expect(await cache.retain(Object(), key), isNull);
+  });
+  test('playback consumption wins over a pending retention', () async {
+    final model = PlayUrlModel();
+    await cache.preload(account, key, () async => Success(model));
+    final retained = cache.retain(account, key);
+    final taken = cache.take(account, key);
+    expect(await retained, isNull);
+    expect(await taken, same(model));
+    expect(await cache.take(account, key), isNull);
+  });
+  test('retention cannot claim an unfinished request', () async {
+    final ready = Completer<LoadingState<PlayUrlModel>>();
+    final loading = cache.preload(account, key, () => ready.future);
+    expect(await cache.retain(account, key), isNull);
+    ready.complete(Success(PlayUrlModel()));
+    await loading;
+    expect(await cache.retain(account, key), isNotNull);
+  });
+  test(
     'in-flight response has one consumer and duplicate preload joins',
     () async {
       final ready = Completer<LoadingState<PlayUrlModel>>();

@@ -71,6 +71,26 @@ class PlayUrlPrefetch {
     if (generation != _generation || !_fresh(entry) || result == null) {
       return null;
     }
+    return _usable(result) ? result : null;
+  }
+
+  Future<PlayUrlModel?> retain(Object account, PlayUrlKey key) async {
+    _useAccount(account);
+    final entry = _entries[key];
+    if (entry == null || !entry.done || !_fresh(entry)) return null;
+    final result = await entry.result;
+    if (!identical(_account, account) || !identical(_entries[key], entry)) {
+      return null;
+    }
+    if (!_fresh(entry) || result == null || !_usable(result)) {
+      _entries.remove(key);
+      return null;
+    }
+    entry.created = _now();
+    return result;
+  }
+
+  bool _usable(PlayUrlModel result) {
     final urls = [
       for (final item in [...?result.dash?.video, ...?result.dash?.audio])
         ...item.playUrls,
@@ -81,22 +101,22 @@ class PlayUrlPrefetch {
     try {
       for (final url in urls) {
         final uri = Uri.tryParse(url);
-        if (uri == null) return null;
+        if (uri == null) return false;
         final value = uri.queryParameters['deadline'];
         if (value != null && (int.tryParse(value) ?? 0) <= deadline) {
-          return null;
+          return false;
         }
       }
     } on FormatException {
-      return null;
+      return false;
     }
-    return result;
+    return true;
   }
 }
 
 class _Entry {
   _Entry(this.created, this.result);
-  final DateTime created;
+  DateTime created;
   final Future<PlayUrlModel?> result;
   bool done = false;
 }

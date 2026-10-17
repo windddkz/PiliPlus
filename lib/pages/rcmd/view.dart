@@ -5,6 +5,7 @@ import 'package:PiliPlus/common/sliver_single_child_delegate.dart';
 import 'package:PiliPlus/common/style.dart';
 import 'package:PiliPlus/common/widgets/flutter/refresh_indicator.dart';
 import 'package:PiliPlus/common/widgets/loading_widget/http_error.dart';
+import 'package:PiliPlus/common/widgets/route_aware_mixin.dart';
 import 'package:PiliPlus/common/widgets/video_card/video_card_v.dart';
 import 'package:PiliPlus/http/loading_state.dart';
 import 'package:PiliPlus/http/video.dart';
@@ -27,9 +28,51 @@ class RcmdPage extends StatefulWidget {
 }
 
 class _RcmdPageState extends State<RcmdPage>
-    with AutomaticKeepAliveClientMixin {
+    with
+        AutomaticKeepAliveClientMixin,
+        RouteAware,
+        RouteAwareMixin,
+        WidgetsBindingObserver {
   final controller = Get.put(RcmdController());
   List<dynamic>? _prefetchList;
+  Timer? _prefetchTimer;
+  bool _prefetching = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _prefetchTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => _retainPrefetch(),
+    );
+  }
+
+  void _retainPrefetch() {
+    final items = _prefetchList;
+    if (_prefetching || items == null || !_canPrefetch) return;
+    _prefetching = true;
+    unawaited(
+      _prefetch(items).catchError((Object _) {}).whenComplete(() {
+        _prefetching = false;
+      }),
+    );
+  }
+
+  @override
+  void didPopNext() => _retainPrefetch();
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _retainPrefetch();
+  }
+
+  @override
+  void dispose() {
+    _prefetchTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
 
   bool get _canPrefetch {
     if (!mounted ||
@@ -49,7 +92,7 @@ class _RcmdPageState extends State<RcmdPage>
     if (!_canPrefetch) return;
     final network = await Connectivity().checkConnectivity();
     if (!network.contains(ConnectivityResult.wifi)) return;
-    // shortcut: First three feed entries; use visible rows when integrating media preloading.
+    // shortcut: First three feed entries; switch selection to visible rows in the next coverage change.
     var count = 0;
     for (final item in items) {
       if (!_canPrefetch || !identical(items, _prefetchList)) return;
@@ -113,7 +156,7 @@ class _RcmdPageState extends State<RcmdPage>
         when !identical(response, _prefetchList)) {
       _prefetchList = response;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaited(_prefetch(response).catchError((Object _) {}));
+        _retainPrefetch();
       });
     }
     return switch (loadingState) {

@@ -139,6 +139,31 @@ public final class OfficialPreloadCacheTest {
             c.add("a","a");long task=f.task;check(c.takeReady("a",i->{throw new AssertionError();}));
             c.event(0,task,"READY",-22);check(c.isBroken() && f.failures==1 && !f.calls.contains("release:a"));
         }
-        System.out.println("13 ownership scenarios passed");
+        {
+            Fake f=new Fake();OfficialPreloadCache<String> c=f.cache();
+            c.add("a","a");long task=f.task;c.event(0,task,"READY",0);
+            f.now=20000;check(c.retain("a"));check(f.timers.size()==1);
+            f.now=30000;f.timers.get(0).run();check(f.timers.size()==2);
+            check(c.peek("a").equals("a") && !f.calls.contains("remove:a"));
+            f.now=50000;check(!c.retain("a"));f.timers.get(1).run();
+            check(f.calls.contains("remove:a") && !f.calls.contains("release:a"));
+            c.event(f.request,task,"REMOVED",0);check(f.calls.contains("release:a"));
+        }
+        {
+            Fake f=new Fake();OfficialPreloadCache<String> c=f.cache();
+            c.add("a","a");long task=f.task;
+            f.now=10000;check(c.retain("a"));check(c.takeReady("a",i->{}));
+            check(!c.retain("a"));c.event(0,task,"READY",0);check(!c.retain("a"));
+            c.event(f.request,task,"DETACHED",0);check(!c.retain("a"));
+        }
+        {
+            Fake f=new Fake();OfficialPreloadCache<String> c=f.cache();
+            c.add("a","old");c.discard("a");long removal=f.request,old=f.task;
+            c.add("a","new");f.now=20000;check(c.retain("a"));
+            c.event(removal,old,"REMOVED",0);
+            f.now=30000;check(c.peek("a").equals("new"));
+            check(f.calls.contains("release:old") && !f.calls.contains("release:new"));
+        }
+        System.out.println("16 ownership scenarios passed");
     }
 }

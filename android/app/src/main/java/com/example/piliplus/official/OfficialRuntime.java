@@ -445,7 +445,8 @@ final class OfficialRuntime {
         for(String header:new String[]{ua,referer})if(header.length()>4096||header.contains("\r")||header.contains("\n"))throw new IllegalArgumentException("Invalid source header");
         if(player!=null)return;
         ensurePreloader();
-        if(preloads.isBroken() || preloads.size()+preloadProbes.size()>=3 || preloadProbes.containsKey(key) || preloads.peek(key)!=null)return;
+        if(preloads.retain(key))return;
+        if(preloads.isBroken() || preloads.size()+preloadProbes.size()>=3 || preloadProbes.containsKey(key))return;
         Bundle request=new Bundle(data);
         if(useNativeMetadata(video,sound)) {
             NativeMedia media=media(request,null);media.item=nativeItem(media.asset,request.getLong("position",0));preloads.add(key,media);

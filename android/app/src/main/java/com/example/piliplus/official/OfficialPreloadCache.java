@@ -18,14 +18,15 @@ final class OfficialPreloadCache<T> {
     interface Scheduler { void after(long millis, Runnable action); }
     private enum State { ADDING, READY, DETACHING, REMOVING }
     private final class Entry {
-        final long task, added, created;
+        final long task, added;
+        long renewed;
         final String key;
         final T item;
         long movement;
         State state = State.ADDING;
         Consumer<T> consumer;
         Entry(String key, T item) {
-            this.key=key; this.item=item; task=++serial; added=++serial; created=now.getAsLong();
+            this.key=key; this.item=item; task=++serial; added=++serial; renewed=now.getAsLong();
         }
     }
     private final Backend<T> backend;
@@ -49,9 +50,20 @@ final class OfficialPreloadCache<T> {
         if (broken || key == null) return null;
         for (Entry entry : entries.values()) {
             if (entry.key.equals(key) && entry.consumer == null && (entry.state == State.ADDING || entry.state == State.READY) &&
-                    now.getAsLong()-entry.created < 30000) return entry.item;
+                    now.getAsLong()-entry.renewed < 30000) return entry.item;
         }
         return null;
+    }
+    boolean retain(String key) {
+        if (broken || key == null) return false;
+        for (Entry entry : entries.values()) {
+            if (entry.key.equals(key) && entry.consumer == null &&
+                    (entry.state == State.ADDING || entry.state == State.READY) &&
+                    now.getAsLong()-entry.renewed < 30000) {
+                entry.renewed=now.getAsLong(); return true;
+            }
+        }
+        return false;
     }
     void discard(String key) {
         if (key == null) return;
@@ -80,11 +92,17 @@ final class OfficialPreloadCache<T> {
         entries.put(entry.task,entry);
         try { backend.add(entry.added,entry.task,item); }
         catch (Exception error) { fail(error); return false; }
-        scheduler.after(30000, () -> {
-            if (entries.get(entry.task) == entry && entry.consumer == null &&
-                    (entry.state == State.ADDING || entry.state == State.READY)) remove(entry);
-        });
+        expire(entry,30000);
         return true;
+    }
+
+    private void expire(Entry entry,long delay) {
+        scheduler.after(delay, () -> {
+            if (entries.get(entry.task) != entry || entry.consumer != null ||
+                    (entry.state != State.ADDING && entry.state != State.READY)) return;
+            long remaining=30000-(now.getAsLong()-entry.renewed);
+            if (remaining>0) expire(entry,remaining); else remove(entry);
+        });
     }
 
     boolean take(String key, Consumer<T> consumer) {
@@ -98,7 +116,7 @@ final class OfficialPreloadCache<T> {
         for (Entry entry : entries.values()) {
             if (!entry.key.equals(key)) continue;
             if (entry.consumer != null) return false;
-            if ((entry.state != State.ADDING && entry.state != State.READY) || now.getAsLong()-entry.created >= 30000) {
+            if ((entry.state != State.ADDING && entry.state != State.READY) || now.getAsLong()-entry.renewed >= 30000) {
                 if (entry.state == State.ADDING || entry.state == State.READY) remove(entry);
                 return false;
             }
