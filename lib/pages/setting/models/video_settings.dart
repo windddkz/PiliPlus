@@ -145,6 +145,22 @@ List<SettingsModel> get videoSettings => [
       getSubtitle: () => '当前：${Pref.audioOutput}',
       onTap: _showAudioOutputDialog,
     ),
+  if (Platform.isAndroid)
+    const SwitchModel(
+      title: '官方音频播放内核（实验）',
+      subtitle: '下次打开播放器生效，需要研究版运行时；播放信息显示实际内核。关闭可恢复 mpv。',
+      leading: Icon(Icons.surround_sound_outlined),
+      setKey: SettingBoxKey.officialAudioBackend,
+      defaultVal: true,
+    ),
+  if (Platform.isAndroid)
+    NormalModel(
+      title: '官方内核响度（实验）',
+      leading: const Icon(Icons.graphic_eq),
+      getSubtitle: () =>
+          '仅官方内核生效，下次开片更新；${_officialLoudnessModes[Pref.officialLoudnessMode] ?? '关闭'}。按原版条件启用，可能放大峰值；缺少有效元数据时不处理。',
+      onTap: _showOfficialLoudnessDialog,
+    ),
   NormalModel(
     title: '缓冲大小',
     leading: const Icon(Icons.storage_outlined),
@@ -571,3 +587,29 @@ void _showBufferSecDialog(BuildContext context, VoidCallback setState) =>
       title: '缓冲时长',
       suffix: 's',
     );
+
+const _officialLoudnessModes = {
+  'off': '关闭',
+  'normal': '普通目标',
+  'high_dynamic': '高动态场景目标（不是额外压缩）',
+};
+
+Future<void> _showOfficialLoudnessDialog(
+  BuildContext context,
+  VoidCallback setState,
+) async {
+  final result = await showDialog<String>(
+    context: context,
+    builder: (context) => SelectDialog<String>(
+      title: '官方内核响度（实验）',
+      value: Pref.officialLoudnessMode,
+      values: _officialLoudnessModes.entries
+          .map((e) => (e.key, e.value))
+          .toList(),
+    ),
+  );
+  if (result != null) {
+    await GStorage.setting.put(SettingBoxKey.officialLoudnessMode, result);
+    setState();
+  }
+}

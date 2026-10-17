@@ -283,6 +283,8 @@ abstract final class VideoHttp {
           seasonId: seasonId,
           tryLook: tryLook,
           videoType: .pgc,
+          language: language,
+          voiceBalance: voiceBalance,
         );
       }
       return Error(_parseVideoErr(res.data['code'], res.data['message']));

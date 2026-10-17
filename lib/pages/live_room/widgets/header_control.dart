@@ -16,7 +16,6 @@ import 'package:PiliPlus/services/shutdown_timer_service.dart'
 import 'package:PiliPlus/utils/android/android_helper.dart';
 import 'package:PiliPlus/utils/extension/context_ext.dart';
 import 'package:PiliPlus/utils/extension/size_ext.dart';
-import 'package:PiliPlus/utils/extension/string_ext.dart';
 import 'package:PiliPlus/utils/ios/pip_helper.dart';
 import 'package:PiliPlus/utils/platform_utils.dart';
 import 'package:PiliPlus/utils/storage.dart';
@@ -280,7 +279,7 @@ class _LiveHeaderControlState extends State<LiveHeaderControl>
                         children: [
                           const Icon(Icons.volume_up, size: 17),
                           Text(
-                            '播放器音量: ${player.getProperty('volume').subLength(3)}%',
+                            '播放器音量: ${player.state.volume.toStringAsFixed(0)}%',
                             style: const TextStyle(fontSize: 14),
                           ),
                         ],

@@ -390,7 +390,8 @@ class Volume {
     required this.targetOffset,
     required this.targetI,
     required this.targetTp,
-    // required this.multiSceneArgs,
+    this.multiSceneArgs,
+    this.missingFields = const {},
   });
 
   final num measuredI;
@@ -401,22 +402,64 @@ class Volume {
   final num targetI;
   final num targetTp;
 
-  // final MultiSceneArgs? multiSceneArgs;
+  final Map<String, String>? multiSceneArgs;
+  final Set<String> missingFields;
+  static const _metadataKeys = [
+    'measured_i',
+    'measured_lra',
+    'measured_tp',
+    'measured_threshold',
+    'target_offset',
+    'target_i',
+    'target_tp',
+  ];
+  List<num?> get officialValues {
+    final values = [
+      measuredI,
+      measuredLra,
+      measuredTp,
+      measuredThreshold,
+      targetOffset,
+      targetI,
+      targetTp,
+    ];
+    return List.generate(
+      values.length,
+      (i) => missingFields.contains(_metadataKeys[i]) || !values[i].isFinite
+          ? null
+          : values[i],
+    );
+  }
 
   // FFmpeg loudnorm 滤镜的标准有效范围（https://ffmpeg.org/ffmpeg-filters.html#loudnorm）
   static const double minTpValue = -9.0;
   static const double maxTpValue = 0.0;
 
   factory Volume.fromJson(Map<String, dynamic> json) {
+    num value(String key) => json[key] is num ? json[key] as num : 0;
+    final scenes = json['multi_scene_args'];
     return Volume(
-      measuredI: json["measured_i"] ?? 0,
-      measuredLra: json["measured_lra"] ?? 0,
-      measuredTp: json["measured_tp"] ?? 0,
-      measuredThreshold: json["measured_threshold"] ?? 0,
-      targetOffset: json["target_offset"] ?? 0,
-      targetI: json["target_i"] ?? 0,
-      targetTp: json["target_tp"] ?? 0,
-      // multiSceneArgs: json["multi_scene_args"] == null ? null : MultiSceneArgs.fromJson(json["multi_scene_args"]),
+      measuredI: value('measured_i'),
+      measuredLra: value('measured_lra'),
+      measuredTp: value('measured_tp'),
+      measuredThreshold: value('measured_threshold'),
+      targetOffset: value('target_offset'),
+      targetI: value('target_i'),
+      targetTp: value('target_tp'),
+      missingFields: {
+        for (final key in _metadataKeys)
+          if (json[key] is! num) key,
+      },
+      multiSceneArgs: scenes == null
+          ? null
+          : scenes is Map
+          ? {
+              for (final entry in scenes.entries)
+                entry.key.toString(): entry.value is String
+                    ? entry.value as String
+                    : 'invalid',
+            }
+          : {'invalid': 'invalid'},
     );
   }
 

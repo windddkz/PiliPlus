@@ -542,7 +542,7 @@ class VideoDetailController extends GetxController
   @override
   BlockConfigMixin get blockConfig => plPlayerController;
   @override
-  Player? get player => plPlayerController.videoPlayerController;
+  PlatformPlayer? get player => plPlayerController.videoPlayerController;
   @override
   bool get isFullScreen => plPlayerController.isFullScreen.value;
   @override
@@ -762,7 +762,7 @@ class VideoDetailController extends GetxController
       },
       width: firstVideo.width,
       height: firstVideo.height,
-      volume: volume,
+      volume: isFileSource ? null : volume,
       autoFullScreenFlag: autoFullScreenFlag,
     );
 
@@ -786,6 +786,15 @@ class VideoDetailController extends GetxController
   }
 
   bool isQuerying = false;
+  int _videoUrlRequest = 0;
+
+  void _invalidateVideoUrl() {
+    ++_videoUrlRequest;
+    isQuerying = false;
+  }
+
+  bool _isCurrentVideoUrl(int request) =>
+      !isClosed && request == _videoUrlRequest;
 
   final languages = Rxn<List<LanguageItem>>();
   final currLang = Rxn<String>();
@@ -809,16 +818,16 @@ class VideoDetailController extends GetxController
       tryLook: plPlayerController.tryLook,
       videoType: _actualVideoType ?? videoType,
       language: currLang.value,
-      voiceBalance: plPlayerController.enableAudioNormalization,
+      voiceBalance: plPlayerController.requestLoudnessMetadata,
     );
   }
 
-  Future<void> _supplementVideoQualities() async {
-    final quality = data.missingVideoQualityBelowHighest;
+  Future<void> _supplementVideoQualities(PlayUrlModel resource) async {
+    final quality = resource.missingVideoQualityBelowHighest;
     if (quality == -1) return;
     final result = await _getVideoUrl(quality);
     if (result case Success(:final response)) {
-      data.dash!.video!.merge(response.dash?.video);
+      resource.dash!.video!.merge(response.dash?.video);
     }
   }
 
@@ -830,27 +839,32 @@ class VideoDetailController extends GetxController
     bool fromReset = false,
     bool autoFullScreenFlag = false,
   }) async {
+    if (isClosed) return;
     if (isFileSource) {
       return initPlayerIfNeeded(autoFullScreenFlag);
     }
-    if (isQuerying) {
-      return;
-    }
+    if (isQuerying && !fromReset) return;
+    final request = ++_videoUrlRequest;
     isQuerying = true;
     try {
-      await _queryVideoUrl(fromReset, autoFullScreenFlag);
+      await _queryVideoUrl(fromReset, autoFullScreenFlag, request);
     } finally {
-      isQuerying = false;
+      if (_isCurrentVideoUrl(request)) isQuerying = false;
     }
   }
 
   @pragma('vm:prefer-inline')
-  Future<void> _queryVideoUrl(bool fromReset, bool autoFullScreenFlag) async {
+  Future<void> _queryVideoUrl(
+    bool fromReset,
+    bool autoFullScreenFlag,
+    int request,
+  ) async {
     if (plPlayerController.enableSponsorBlock && isBlock && !fromReset) {
       querySponsorBlock(bvid: bvid, cid: cid.value);
     }
     if (plPlayerController.cacheVideoQa == null) {
       final isWiFi = await ConnectivityUtils.isWiFi;
+      if (!_isCurrentVideoUrl(request)) return;
       plPlayerController
         ..cacheVideoQa = isWiFi
             ? Pref.defaultVideoQa
@@ -862,10 +876,13 @@ class VideoDetailController extends GetxController
     }
 
     final result = await _getVideoUrl(VideoQuality.hdrVivid.code);
+    if (!_isCurrentVideoUrl(request)) return;
 
     if (result case Success(:final response)) {
+      // Keep all response mutations local until this request is still current.
+      if (response.dash != null) await _supplementVideoQualities(response);
+      if (!_isCurrentVideoUrl(request)) return;
       data = response;
-      if (data.dash != null) await _supplementVideoQualities();
 
       languages.value = data.language?.items;
       currLang.value = data.curLanguage;
@@ -1251,6 +1268,7 @@ class VideoDetailController extends GetxController
 
   @override
   void onClose() {
+    _invalidateVideoUrl();
     cid.close();
     if (isFileSource) {
       cacheLocalProgress();
@@ -1268,6 +1286,7 @@ class VideoDetailController extends GetxController
   }
 
   void onReset({bool isStein = false}) {
+    _invalidateVideoUrl();
     if (isFileSource) {
       cacheLocalProgress();
     }
@@ -1276,6 +1295,7 @@ class VideoDetailController extends GetxController
     defaultST = null;
     videoUrl = null;
     audioUrl = null;
+    volume = null;
 
     // danmaku
     savedDanmaku = null;
@@ -1559,6 +1579,10 @@ class VideoDetailController extends GetxController
           TextButton(
             onPressed: () {
               Get.back();
+              if (videoUrl != this.videoUrl || audioUrl != this.audioUrl) {
+                volume = null;
+              }
+              _invalidateVideoUrl();
               this.videoUrl = videoUrl;
               this.audioUrl = audioUrl;
               playerInit();

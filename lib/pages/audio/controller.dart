@@ -30,6 +30,8 @@ import 'package:PiliPlus/plugin/pl_player/controller.dart';
 import 'package:PiliPlus/plugin/pl_player/models/play_repeat.dart';
 import 'package:PiliPlus/plugin/pl_player/models/play_status.dart';
 import 'package:PiliPlus/services/service_locator.dart';
+import 'package:PiliPlus/services/playback_focus.dart';
+import 'package:PiliPlus/plugin/pl_player/audio_ducking.dart';
 import 'package:PiliPlus/services/shutdown_timer_service.dart';
 import 'package:PiliPlus/utils/accounts.dart';
 import 'package:PiliPlus/utils/android/android_helper.dart';
@@ -59,7 +61,21 @@ class AudioController extends GetxController
         FavMixin,
         BlockConfigMixin,
         BlockMixin,
-        AudioNormalizationMixin {
+        AudioNormalizationMixin
+    implements AudioFocusClient {
+  final _audioDucking = AudioDucking();
+  bool _closing = false;
+  @override
+  bool get audioFocusAvailable => !_closing && !isClosed && player != null;
+  @override
+  bool get audioFocusPlaying => isPlaying();
+  @override
+  Future<void> playForAudioFocus() async => player?.play();
+  @override
+  Future<void> pauseForAudioFocus() async => player?.pause();
+  @override
+  Future<void> setAudioDucked(bool ducked) =>
+      _audioDucking.apply(player, ducked);
   late Int64 id;
   late Int64 oid;
   late List<Int64> subId;
@@ -218,11 +234,11 @@ class AudioController extends GetxController
   }
 
   Future<void>? onPlay() {
-    return player?.play();
+    return audioSessionHandler?.play(this).then((_) {}) ?? playForAudioFocus();
   }
 
   Future<void>? onPause() {
-    return player?.pause();
+    return audioSessionHandler?.pause(this) ?? pauseForAudioFocus();
   }
 
   Future<void>? onSeek(Duration duration) {
@@ -365,14 +381,17 @@ class AudioController extends GetxController
   }) async {
     await _initPlayerIfNeeded();
     final extras = audioFilterExtras(volume);
-    player
-      ?..setMediaHeader(
-        userAgent: ua,
-        // mpv cannot clear referer option
-        headers: {'Referer': ?referer},
-      )
-      ..open(Media(url, start: _start, extras: extras));
+    final current = player;
+    if (!audioFocusAvailable || current == null) return;
+    current.setMediaHeader(
+      userAgent: ua,
+      // mpv cannot clear referer option
+      headers: {'Referer': ?referer},
+    );
+    final start = _start;
     _start = null;
+    await current.open(Media(url, start: start, extras: extras), play: false);
+    if (audioFocusAvailable && player == current) await onPlay();
   }
 
   PlayerStatus _playerStatus = .paused;
@@ -444,6 +463,7 @@ class AudioController extends GetxController
       stream.completed.listen((completed) {
         _videoDetailController?.playedTime = player!.state.duration;
         if (completed) {
+          unawaited(audioSessionHandler?.release(this));
           _playerStatus = .completed;
           _startStatusTimer();
           if (shutdownTimerService.isWaiting) {
@@ -697,7 +717,7 @@ class AudioController extends GetxController
   }
 
   Future<void>? playOrPause() {
-    return player?.playOrPause();
+    return isPlaying() ? onPause() : onPlay();
   }
 
   bool playPrev() {
@@ -821,6 +841,8 @@ class AudioController extends GetxController
 
   @override
   void onClose() {
+    _closing = true;
+    unawaited(audioSessionHandler?.release(this));
     _stopStatusTimer();
     shutdownTimerService
       ..onPause = null

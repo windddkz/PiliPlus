@@ -1219,40 +1219,47 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
     onPopInvokedWithResult:
         videoDetailController.plPlayerController.onPopInvokedWithResult,
     child: Obx(
-      () =>
-          !videoDetailController.videoState.value ||
-              !videoDetailController.autoPlay ||
-              plPlayerController?.videoController == null
-          ? const SizedBox.shrink()
-          : PLVideoPlayer(
-              maxWidth: width,
-              maxHeight: height,
-              plPlayerController: plPlayerController!,
-              videoDetailController: videoDetailController,
-              introController: introController,
-              headerControl: HeaderControl(
-                key: videoDetailController.headerCtrKey,
-                isPortrait: isPortrait,
-                controller: videoDetailController.plPlayerController,
-                videoDetailCtr: videoDetailController,
-                heroTag: heroTag,
-              ),
-              danmuWidget: isPipMode && pipNoDanmaku
-                  ? null
-                  : Obx(
-                      () => PlDanmaku(
-                        key: ValueKey(videoDetailController.cid.value),
-                        isPipMode: isPipMode,
-                        cid: videoDetailController.cid.value,
-                        playerController: plPlayerController!,
-                        isFullScreen: plPlayerController!.isFullScreen.value,
-                        isFileSource: videoDetailController.isFileSource,
-                        size: Size(width, height),
+      () {
+        // Manual play has no page-local player yet; subscribe to the owning controller before open waits for its Surface.
+        final controller = videoDetailController.plPlayerController;
+        final hasOutput = controller.hasVideoOutput;
+        final mountOfficial = controller.needsOfficialVideoSurface;
+        return ((!videoDetailController.videoState.value ||
+                        !videoDetailController.autoPlay) &&
+                    !mountOfficial) ||
+                !hasOutput
+            ? const SizedBox.shrink()
+            : PLVideoPlayer(
+                key: ValueKey(controller.backendRevision.value),
+                maxWidth: width,
+                maxHeight: height,
+                plPlayerController: controller,
+                videoDetailController: videoDetailController,
+                introController: introController,
+                headerControl: HeaderControl(
+                  key: videoDetailController.headerCtrKey,
+                  isPortrait: isPortrait,
+                  controller: videoDetailController.plPlayerController,
+                  videoDetailCtr: videoDetailController,
+                  heroTag: heroTag,
+                ),
+                danmuWidget: isPipMode && pipNoDanmaku
+                    ? null
+                    : Obx(
+                        () => PlDanmaku(
+                          key: ValueKey(videoDetailController.cid.value),
+                          isPipMode: isPipMode,
+                          cid: videoDetailController.cid.value,
+                          playerController: controller,
+                          isFullScreen: controller.isFullScreen.value,
+                          isFileSource: videoDetailController.isFileSource,
+                          size: Size(width, height),
+                        ),
                       ),
-                    ),
-              showEpisodes: showEpisodes,
-              showViewPoints: showViewPoints,
-            ),
+                showEpisodes: showEpisodes,
+                showViewPoints: showViewPoints,
+              );
+      },
     ),
   );
 

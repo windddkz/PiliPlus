@@ -851,6 +851,12 @@ abstract final class Pref {
     defaultValue: AudioOutput.defaultValue,
   );
 
+  static String get officialLoudnessMode =>
+      _setting.get(SettingBoxKey.officialLoudnessMode, defaultValue: 'off');
+
+  static bool get officialAudioBackend =>
+      _setting.get(SettingBoxKey.officialAudioBackend, defaultValue: true);
+
   static bool get enableAi =>
       _setting.get(SettingBoxKey.enableAi, defaultValue: false);
 

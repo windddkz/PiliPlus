@@ -14,6 +14,8 @@ abstract final class SettingBoxKey {
       defaultPicQa = 'defaultPicQa',
       enableHA = 'enableHA',
       audioOutput = 'audioOutput',
+      officialAudioBackend = 'officialAudioBackend',
+      officialLoudnessMode = 'officialLoudnessMode',
       bufferSize = 'bufferSize',
       bufferSec = 'bufferSec',
       hardwareDecoding = 'hardwareDecoding',

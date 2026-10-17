@@ -72,7 +72,7 @@ import 'package:hive_ce/hive.dart';
 import 'package:intl/intl.dart' show DateFormat;
 import 'package:material_design_icons_flutter/material_design_icons_flutter.dart';
 import 'package:material_ui/material_ui.dart' hide showBottomSheet;
-import 'package:media_kit/media_kit.dart' show NativePlayer;
+import 'package:media_kit/media_kit.dart' show NativePlayer, PlatformPlayer;
 
 mixin TimeBatteryMixin<T extends StatefulWidget> on State<T> {
   PlPlayerController get plPlayerController;
@@ -588,8 +588,10 @@ class HeaderControlState extends State<HeaderControl>
                                     !onlyPlayAudio;
                                 final player =
                                     plPlayerController.videoPlayerController!;
-                                if (onlyPlayAudio &&
-                                    player.state.tracks.video.length <= 2) {
+                                if (player is! NativePlayer ||
+                                    (onlyPlayAudio &&
+                                        player.state.tracks.video.length <=
+                                            2)) {
                                   videoDetailCtr.playerInit();
                                 } else {
                                   player.setProperty(
@@ -782,7 +784,11 @@ class HeaderControlState extends State<HeaderControl>
                     dense: true,
                     title: const Text('播放信息', style: titleStyle),
                     leading: const Icon(Icons.info_outline, size: 20),
-                    onTap: () => showPlayerInfo(context, player: player),
+                    onTap: () => showPlayerInfo(
+                      context,
+                      player: player,
+                      backendDescription: plPlayerController.backendDescription,
+                    ),
                   ),
                 ListTile(
                   dense: true,
@@ -807,10 +813,15 @@ class HeaderControlState extends State<HeaderControl>
 
   static void showPlayerInfo(
     BuildContext context, {
-    required NativePlayer player,
+    required PlatformPlayer player,
+    String? backendDescription,
   }) {
-    final hwdec = player.getProperty('hwdec-current');
-    final volume = player.getProperty('volume');
+    final hwdec = player is NativePlayer
+        ? player.getProperty('hwdec-current')
+        : '软件解码';
+    final volume = player is NativePlayer
+        ? player.getProperty('volume')
+        : player.state.volume.toString();
     showDialog(
       context: context,
       builder: (context) {
@@ -826,6 +837,11 @@ class HeaderControlState extends State<HeaderControl>
               child: SingleChildScrollView(
                 child: Column(
                   children: [
+                    ListTile(
+                      dense: true,
+                      title: const Text('实际播放内核'),
+                      subtitle: Text(backendDescription ?? 'mpv'),
+                    ),
                     ListTile(
                       dense: true,
                       title: const Text("Resolution"),
