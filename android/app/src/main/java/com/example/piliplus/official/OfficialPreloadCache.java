@@ -92,7 +92,7 @@ final class OfficialPreloadCache<T> {
                 return true;
         return false;
     }
-    void makeRoom() {
+    void makeRoom(int incomingPriority) {
         if (broken)
             return;
         Entry oldest = null;
@@ -112,7 +112,10 @@ final class OfficialPreloadCache<T> {
                                                     && entry.renewed < oldest.renewed)))))
                 oldest = entry;
         }
-        if (oldest != null)
+        // Let preparation finish before a same/lower-priority candidate rotates into this slot.
+        if (oldest != null
+                && (oldest.state == State.READY
+                        || priority.applyAsInt(oldest.item) > incomingPriority))
             remove(oldest);
     }
     void discardExcept(String key) {
@@ -183,7 +186,7 @@ final class OfficialPreloadCache<T> {
             }
         }
         if (entries.size() >= capacity) {
-            makeRoom();
+            makeRoom(priority.applyAsInt(item));
             // Pending removals still own native handles and count against the bound.
             backend.release(item);
             return false;

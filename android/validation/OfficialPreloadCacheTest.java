@@ -48,6 +48,38 @@ public final class OfficialPreloadCacheTest {
     public static void main(String[] args) throws Exception {
         {
             Fake f = new Fake();
+            OfficialPreloadCache<String> c = new OfficialPreloadCache<>(
+                    f, f, () -> f.now, 2, 30000, item -> item.equals("visible") ? 0 : 100);
+            c.add("a", "visible");
+            c.event(0, f.task, "READY", 0);
+            c.add("b", "preparing");
+            long task = f.task;
+            int calls = f.calls.size();
+            c.makeRoom(200);
+            c.makeRoom(100);
+            check(f.calls.size() == calls && c.preparing() == 1);
+            c.event(0, task, "READY", 0);
+            c.makeRoom(0);
+            check(f.calls.contains("remove:preparing") && !f.calls.contains("remove:visible"));
+            c.event(f.request, task, "REMOVED", 0);
+            check(c.size() == 1);
+        }
+        {
+            Fake f = new Fake();
+            OfficialPreloadCache<String> c = new OfficialPreloadCache<>(
+                    f, f, () -> f.now, 1, 30000, item -> item.equals("new-visible") ? 0 : 100);
+            c.add("old", "old-page");
+            long task = f.task;
+            check(!c.add("new", "new-visible"));
+            check(f.calls.contains("remove:old-page") && c.size() == 1);
+            long removal = f.request;
+            c.event(removal + 1, task, "REMOVED", 0);
+            check(c.size() == 1);
+            c.event(removal, task, "REMOVED", 0);
+            check(c.add("new", "new-visible") && c.size() == 1);
+        }
+        {
+            Fake f = new Fake();
             OfficialPreloadCache<String> c = f.cache();
             List<String> consumed = new ArrayList<>();
             check(c.add("a", "item-a"));
@@ -93,8 +125,10 @@ public final class OfficialPreloadCacheTest {
         {
             Fake f = new Fake();
             OfficialPreloadCache<String> c = f.cache();
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < 3; i++) {
                 c.add("k" + i, "v" + i);
+                c.event(0, f.task, "READY", 0);
+            }
             check(!c.add("next", "extra"));
             check(c.size() == 3);
             check(!f.calls.contains("add:extra") && f.calls.contains("release:extra"));
@@ -313,10 +347,10 @@ public final class OfficialPreloadCacheTest {
             c.add("c", "c");
             f.now = 3;
             check(c.retain("a"));
-            c.makeRoom();
+            c.makeRoom(-1);
             long removal = f.request, task = f.task;
             check(f.calls.contains("remove:b") && !f.calls.contains("remove:a") && c.size() == 3);
-            c.makeRoom();
+            c.makeRoom(0);
             check(!f.calls.contains("remove:c"));
             c.event(removal + 99, task, "REMOVED", 0);
             check(c.size() == 3);
@@ -333,12 +367,12 @@ public final class OfficialPreloadCacheTest {
             long bt = f.task;
             check(c.take("b", i -> {}));
             c.add("c", "c");
-            c.makeRoom();
+            c.makeRoom(-1);
             check(f.calls.contains("remove:c") && !f.calls.contains("interrupt:a")
                     && !f.calls.contains("interrupt:b"));
             c.event(f.request, f.task, "REMOVED", 0);
             int calls = f.calls.size();
-            c.makeRoom();
+            c.makeRoom(0);
             check(f.calls.size() == calls && c.size() == 2);
             c.event(0, bt, "READY", 0);
             check(c.size() == 2);
@@ -349,7 +383,7 @@ public final class OfficialPreloadCacheTest {
             c.add("a", "a");
             c.event(f.request, f.task, "ADDED", -22);
             int calls = f.calls.size();
-            c.makeRoom();
+            c.makeRoom(0);
             check(f.calls.size() == calls && c.isBroken());
         }
         {
@@ -478,14 +512,14 @@ public final class OfficialPreloadCacheTest {
             f.now++;
             c.add("b", "distant");
             c.event(0, f.task, "READY", 0);
-            c.makeRoom();
+            c.makeRoom(0);
             check(f.calls.contains("remove:distant") && !f.calls.contains("remove:visible"));
             c.event(f.request, f.task, "REMOVED", 0);
             c.add("c", "new-page");
             c.event(0, f.task, "READY", 0);
             priority.clear();
             priority.put("new-page", 0);
-            c.makeRoom();
+            c.makeRoom(0);
             check(f.calls.contains("remove:visible") && !f.calls.contains("remove:new-page"));
         }
         {
@@ -531,6 +565,6 @@ public final class OfficialPreloadCacheTest {
             check(!c.discardMatching("media-a" ::equals));
         }
         System.out.println(
-                "28 ownership, dynamic priority, position replacement and thirty-slot scenarios passed");
+                "30 ownership, priority admission, position replacement and thirty-slot scenarios passed");
     }
 }

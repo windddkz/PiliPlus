@@ -1288,7 +1288,7 @@ final class OfficialRuntime {
                     >= (player == null ? PRELOAD_PARALLELISM : 1))
                 return;
             if (preloads.size() + preloadProbes.size() >= OfficialPreloadCache.MAX_ENTRIES) {
-                preloads.makeRoom();
+                preloads.makeRoom(preloadPriority(request.getString("preloadCandidate")));
                 return;
             }
             pendingPreloads.remove(key);
