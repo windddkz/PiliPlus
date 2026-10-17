@@ -29,7 +29,8 @@ static void audio_buffer_lock(void *guard,void *mutex){((void (*)(void *,void *)
 static void audio_buffer_unlock(void *guard){((void (*)(void *))(base+0x1f3834))(guard);}
 static int audio_buffer_queues(void *checker,AudioBufferState *s){
     if(FIELD(checker,0x30,uint64_t)!=2||FIELD(checker,0x60,uint64_t)!=2)return 0;
-    for(int kind=0;kind<2;kind++){
+    // Frames first avoids counting the same audio packet again after decoder handoff.
+    for(int kind=1;kind>=0;kind--){
         void *node=FIELD(checker,kind?0x58:0x28,void *);unsigned n=0;
         for(;node&&n<2;n++,node=FIELD(node,0,void *)){
             AudioBufferQueue *q=kind?&s->frames[n]:&s->packets[n];q->type=FIELD(node,0x10,int);
