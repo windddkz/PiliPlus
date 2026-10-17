@@ -16,6 +16,7 @@ import 'package:PiliPlus/common/widgets/selection_text.dart';
 import 'package:PiliPlus/grpc/bilibili/app/listener/v1.pb.dart';
 import 'package:PiliPlus/models/common/image_preview_type.dart';
 import 'package:PiliPlus/models/common/image_type.dart';
+import 'package:PiliPlus/models/video/play/url.dart' as http_model;
 import 'package:PiliPlus/pages/audio/controller.dart';
 import 'package:PiliPlus/pages/audio/volume_button.dart';
 import 'package:PiliPlus/pages/setting/models/play_settings.dart'
@@ -59,6 +60,7 @@ class AudioPage extends StatefulWidget {
     String? heroTag,
     Duration? start,
     String? audioUrl,
+    http_model.Volume? volume,
     int? extraId,
   }) => Get.toNamed(
     '/audio',
@@ -71,6 +73,7 @@ class AudioPage extends StatefulWidget {
       'heroTag': ?heroTag,
       'start': ?start,
       'audioUrl': ?audioUrl,
+      'volume': ?volume,
       'extraId': ?extraId,
     },
   );
@@ -660,7 +663,8 @@ class _AudioPageState extends State<AudioPage> {
                       showPlayerVolumeDialog(
                         context,
                         () {},
-                        onChanged: (volume) => _controller.setVolume(volume / 100),
+                        onChanged: (volume) =>
+                            _controller.setVolume(volume / 100),
                       );
                     },
                   ),

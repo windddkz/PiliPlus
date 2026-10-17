@@ -264,7 +264,9 @@ class AudioController extends GetxController
         audioUrl,
         ua: BrowserUa.pc,
         referer: HttpString.baseUrl,
-        volume: _videoDetailController?.volume,
+        volume:
+            args['volume'] as http_model.Volume? ??
+            _videoDetailController?.volume,
       );
     }
     ConnectivityUtils.isWiFi.then((isWiFi) {

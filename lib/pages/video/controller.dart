@@ -1450,6 +1450,7 @@ class VideoDetailController extends GetxController
       heroTag: _autoPlay.value ? heroTag : null,
       start: playedTime,
       audioUrl: audioUrl,
+      volume: volume,
       extraId: extraId,
     );
   }
