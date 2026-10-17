@@ -167,6 +167,23 @@ final class OfficialRuntime {
         }
         return writeImage(directory,"libijkffext.so","demux-",bytes);
     }
+    static File networkImage(File directory) throws Exception {
+        byte[] bytes;
+        try(InputStream in=new FileInputStream(new File(directory,"libijksdl.so"));ByteArrayOutputStream out=new ByteArrayOutputStream()){
+            byte[] buffer=new byte[65536];for(int n;(n=in.read(buffer))!=-1;)out.write(buffer,0,n);bytes=out.toByteArray();
+        }
+        if(!hash(bytes).equals("2da376f9875d9bc7e375769a42481ab0a5af738acd6bf3a4d19d4aad954f427c"))
+            throw new SecurityException("Unexpected network image");
+        ByteBuffer code=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+        // Mark private GCM calls in x17; ordinary SSL_read PLT calls set x17 to the dispatch address.
+        int[][] changes={{0x1d664c,0xd10203ff,0x10000011},{0x1d6650,0xa9077bfd,0x90000610},
+            {0x1d6654,0x9101c3fd,0xf9472210},{0x1d6658,0xf9400ba9,0xd61f0200}};
+        for(int[] change:changes){
+            if(code.getInt(change[0])!=change[1])throw new SecurityException("Network instruction mismatch");
+            code.putInt(change[0],change[2]);
+        }
+        return writeImage(directory,"libijksdl.so","network-",bytes);
+    }
     private static File writeImage(File directory,String name,String prefix,byte[] bytes) throws Exception {
         String expected=hash(bytes);
         File folder=new File(directory,prefix+expected);
@@ -219,6 +236,7 @@ final class OfficialRuntime {
         stage("runtime_image");
         File playerDirectory=playerImage(directory);
         File demuxDirectory=demuxImage(directory);
+        File networkDirectory=networkImage(directory);
         // Run before loading any native library; rollback rebuilds its own assets from its APK.
         OfficialRuntimeCache.Result cache=OfficialRuntimeCache.prune(directory.getParentFile(),directory.getName());
         Bundle cacheEvent=new Bundle();cacheEvent.putString("event","runtime_cache_cleanup");
@@ -226,7 +244,7 @@ final class OfficialRuntime {
         cacheEvent.putInt("failedDirectories",cache.failedDirectories);emit(cacheEvent);
         // Standard platform-parent loading preserves Java isolation and a compilable ART context.
         loader=new DexClassLoader(new File(directory,"official.apk").getPath()+File.pathSeparator+new File(directory,"audio-bridge-v1.dex").getPath(),
-            context.getCodeCacheDir().getPath(),playerDirectory.getPath()+File.pathSeparator+demuxDirectory.getPath()+File.pathSeparator+directory.getPath(),Context.class.getClassLoader());
+            context.getCodeCacheDir().getPath(),playerDirectory.getPath()+File.pathSeparator+demuxDirectory.getPath()+File.pathSeparator+networkDirectory.getPath()+File.pathSeparator+directory.getPath(),Context.class.getClassLoader());
         try {
             stage("foundation");
             invoke(cls("com.bilibili.lib.foundation.Foundation"),"init",context,
@@ -237,6 +255,9 @@ final class OfficialRuntime {
             File demux=new File(demuxDirectory,"libijkffext.so");
             try(Reader maps=new FileReader("/proc/self/maps")){verifyMappedImage(demux,maps);}
             android.util.Log.i("PiliRuntimeImage","verified "+demux.getPath());
+            File network=new File(networkDirectory,"libijksdl.so");
+            try(Reader maps=new FileReader("/proc/self/maps")){verifyMappedImage(network,maps);}
+            android.util.Log.i("PiliRuntimeImage","verified "+network.getPath());
             Object logger=construct("com.bilibili.ijk.utils.IJKLog");invoke(logger,"initLogger",false,null,2);
             Field singleton=logger.getClass().getDeclaredField("instance");singleton.setAccessible(true);singleton.set(null,logger);
             stage("dsp_register");
@@ -248,6 +269,7 @@ final class OfficialRuntime {
             boolean networkReadBaseline="profile".equals(com.example.piliplus.BuildConfig.BUILD_TYPE) &&
                 new File(context.getExternalFilesDir(null),"research259-network-baseline").isFile();
             bridge("installNetworkRead",!networkReadBaseline);
+            bridge("installTlsCrypto");
             Object params=cls("com.bilibili.ijk.player.IJKNativeParams").getField("INSTANCE").get(null);
             List<?> keys=(List<?>)invoke(params,"nativeKeys$srcs_base_ijk_ijk_library_android");
             if(!keys.contains("ijk.audio_engine.enable"))throw new IllegalStateException("Audio engine option unavailable");

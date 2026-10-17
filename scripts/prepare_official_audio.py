@@ -52,7 +52,7 @@ build = repo / 'build/official_audio'
 build.mkdir(parents=True, exist_ok=True)
 clang = toolchain / 'android-sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang'
 include = toolchain / 'ffmpeg-source/ffmpeg-7.1.1'
-for name, inputs, libs in [('libpiliplus_audio_graph.so', ['graph_adapter.c','graph_sret.S','media_index.c','media_metadata.c','first_seek.c','media_dash.c','media_switch.c','startup_choice.c','network_read.c'], ['-ldl','-lm','-llog']), ('libpiliplus_audio_dsp.so',['dsp_adapter.c'],['-ldl'])]:
+for name, inputs, libs in [('libpiliplus_audio_graph.so', ['graph_adapter.c','graph_sret.S','media_index.c','media_metadata.c','first_seek.c','media_dash.c','media_switch.c','startup_choice.c','network_read.c','tls_crypto.c'], ['-ldl','-lm','-llog']), ('libpiliplus_audio_dsp.so',['dsp_adapter.c'],['-ldl'])]:
     subprocess.run([str(clang),'-shared','-fPIC','-O2','-Wall','-Wextra','-Wunreachable-code','-Werror','-I',str(include),*[str(source/n) for n in inputs],*libs,'-o',str(build/name)],check=True)
 classes=build/'classes';dex=build/'dex';classes.mkdir(exist_ok=True);dex.mkdir(exist_ok=True)
 javac=toolchain/'jdk-17.0.20.1+1/bin/javac'

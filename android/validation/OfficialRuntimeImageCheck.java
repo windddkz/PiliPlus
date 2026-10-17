@@ -8,6 +8,7 @@ import java.util.Arrays;
 public final class OfficialRuntimeImageCheck {
     public static void main(String[] args) throws Exception {
         checkDemux(Path.of(args[1]));
+        checkNetwork(Path.of(args[2]));
         byte[] original=Files.readAllBytes(Path.of(args[0]));
         Path directory=Files.createTempDirectory("owned-player-image-");
         try {
@@ -31,6 +32,37 @@ public final class OfficialRuntimeImageCheck {
             try{OfficialRuntime.playerImage(directory.toFile());throw new AssertionError("Accepted unlocked original");}
             catch(SecurityException expectedFailure){}
             System.out.println("Exact nine-word image / unchanged original / read-only cache / corruption rejection passed");
+        } finally {
+            try(var paths=Files.walk(directory)){for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toList())Files.delete(path);}
+        }
+    }
+    private static void checkNetwork(Path input) throws Exception {
+        byte[] original=Files.readAllBytes(input);
+        Path directory=Files.createTempDirectory("owned-network-image-");
+        try {
+            Path source=directory.resolve("libijksdl.so");Files.write(source,original);
+            File output=OfficialRuntime.networkImage(directory.toFile());
+            Path image=output.toPath().resolve("libijksdl.so");
+            byte[] expected=original.clone();ByteBuffer words=ByteBuffer.wrap(expected).order(ByteOrder.LITTLE_ENDIAN);
+            words.putInt(0x1d664c,0x10000011);words.putInt(0x1d6650,0x90000610);
+            words.putInt(0x1d6654,0xf9472210);words.putInt(0x1d6658,0xd61f0200);
+            assert Arrays.equals(Files.readAllBytes(source),original):"Original network changed";
+            assert Arrays.equals(Files.readAllBytes(image),expected):"Unexpected derived network instructions";
+            assert Files.getPosixFilePermissions(image).stream().noneMatch(p->p.name().endsWith("WRITE"));
+            assert OfficialRuntime.networkImage(directory.toFile()).equals(output):"Network cache not reused";
+            String mapped="1000-2000 r-xp 00000000 00:00 1 "+image+"\n";
+            OfficialRuntime.verifyMappedImage(image.toFile(),new java.io.StringReader(mapped));
+            for(String invalid:new String[]{"",mapped.replace(image.toString(),source.toString()),mapped.replace("\n"," (deleted)\n")}){
+                try{OfficialRuntime.verifyMappedImage(image.toFile(),new java.io.StringReader(invalid));throw new AssertionError("Accepted wrong mapped network");}
+                catch(SecurityException expectedFailure){}
+            }
+            image.toFile().setWritable(true);Files.write(image,new byte[]{1,2,3});
+            try{OfficialRuntime.networkImage(directory.toFile());throw new AssertionError("Accepted corrupt derived network");}
+            catch(SecurityException expectedFailure){}
+            Files.write(source,new byte[]{1,2,3});
+            try{OfficialRuntime.networkImage(directory.toFile());throw new AssertionError("Accepted unlocked network original");}
+            catch(SecurityException expectedFailure){}
+            System.out.println("Private network image / unchanged original / read-only cache / corruption rejection passed");
         } finally {
             try(var paths=Files.walk(directory)){for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toList())Files.delete(path);}
         }
