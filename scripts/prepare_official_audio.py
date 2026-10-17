@@ -36,16 +36,25 @@ apk_path = a.apk or a.workspace / manifest['apk_path']
 for required in [apk_path, zipalign, d8, clang, javac, include / 'libavutil/avconfig.h']:
     if not required.is_file():
         p.error('Required local input not found: ' + str(required))
-assert hashlib.sha256(apk_path.read_bytes()).hexdigest() == manifest['apk_sha256'], 'Wrong official sample'
+if not (hashlib.sha256(apk_path.read_bytes()).hexdigest() == manifest['apk_sha256']):
+    raise ValueError('Wrong official sample')
 destination = repo / 'android/app/src/officialAudio/assets/official_runtime'
+def asset_path(name):
+    if not name or name in (".", "..") or Path(name).name != name or "\\" in name:
+        raise ValueError("Invalid runtime asset name: " + name)
+    return destination / name
+
+
 destination.mkdir(parents=True, exist_ok=True)
 with zipfile.ZipFile(apk_path) as apk:
-    assert len(manifest['files']) == 10
+    if not (len(manifest['files']) == 10):
+        raise ValueError('Invalid prepare_official_audio.py configuration')
     for name, digest in manifest['files'].items():
-        assert '/' not in name
+        asset_path(name)
         data = apk_path.read_bytes() if name == 'official.apk' else apk.read('lib/arm64-v8a/' + name)
-        assert hashlib.sha256(data).hexdigest() == digest, name
-        (destination / name).write_bytes(data)
+        if not (hashlib.sha256(data).hexdigest() == digest):
+            raise ValueError(name)
+        asset_path(name).write_bytes(data)
 # ART otherwise inflates all 33 original DEX files on every cold class-loader creation.
 unaligned = destination / 'code-unaligned.apk'
 try:
@@ -58,8 +67,10 @@ try:
     subprocess.run([str(zipalign),
                     '-f', '4', str(unaligned), str(destination / 'official.apk')], check=True)
     with zipfile.ZipFile(apk_path) as original, zipfile.ZipFile(destination / 'official.apk') as output:
-        assert original.namelist() == output.namelist(), 'Runtime archive entries changed'
-        assert all(original.read(name) == output.read(name) for name in original.namelist()), 'Runtime code/resources changed'
+        if not (original.namelist() == output.namelist()):
+            raise ValueError('Runtime archive entries changed')
+        if not (all(original.read(name) == output.read(name) for name in original.namelist())):
+            raise ValueError('Runtime code/resources changed')
 finally:
     unaligned.unlink(missing_ok=True)
 manifest['files'].pop('official.apk')
@@ -85,12 +96,14 @@ if previous.exists():
     for group in ['files','owned']:
         for name,digest in previous_manifest.get(group,{}).items():
             if name not in manifest['files'] and name not in manifest['owned'] and name not in manifest['code']:
-                obsolete=destination/name
+                obsolete=asset_path(name)
                 if obsolete.exists():
-                    assert hashlib.sha256(obsolete.read_bytes()).hexdigest()==digest, 'Unexpected generated asset: '+name
+                    if not (hashlib.sha256(obsolete.read_bytes()).hexdigest()==digest):
+                        raise ValueError('Unexpected generated asset: '+name)
                     obsolete.unlink()
 (destination/'runtime-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-assert {p.name for p in destination.iterdir()} == {*manifest['files'],*manifest['owned'],*manifest['code'],'runtime-manifest.json'}
+if not ({p.name for p in destination.iterdir()} == {*manifest['files'],*manifest['owned'],*manifest['code'],'runtime-manifest.json'}):
+    raise ValueError('Invalid prepare_official_audio.py configuration')
 if a.fixtures:
     source = a.fixture_dir or a.workspace / 'native-audio-poc/app/src/main/assets/samples'
     target = repo / 'android/app/src/debug/assets/official_fixture'

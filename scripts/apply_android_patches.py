@@ -24,7 +24,8 @@ def patch_list(name):
 
 def apply(directory, patches):
     directory = directory.resolve()
-    assert directory.is_relative_to(root), directory
+    if not (directory.is_relative_to(root)):
+        raise ValueError(directory)
     for relative in patches:
         patch = source / relative
         command = ['git', '-c', f'safe.directory={directory}', 'apply']
@@ -37,8 +38,10 @@ def apply(directory, patches):
         print('Applied:', relative, flush=True)
 
 sdk_patches, material_patches = patch_list('patches'), patch_list('patches_material')
-assert len(sdk_patches) == 25 and len(material_patches) == 9
-assert sdk_patches[-3:] == ['lib/scripts/bottom_sheet_android.patch', 'lib/scripts/scroll_view.patch', 'lib/scripts/navigator.patch']
+if not (len(sdk_patches) == 25 and len(material_patches) == 9):
+    raise ValueError('Invalid apply_android_patches.py configuration')
+if not (sdk_patches[-3:] == ['lib/scripts/bottom_sheet_android.patch', 'lib/scripts/scroll_view.patch', 'lib/scripts/navigator.patch']):
+    raise ValueError('Invalid apply_android_patches.py configuration')
 if __name__ == '__main__':
     apply(Path(os.environ['FLUTTER_ROOT']), sdk_patches)
     subprocess.run(['flutter', 'pub', 'get', '--enforce-lockfile'], cwd=source, check=True)
