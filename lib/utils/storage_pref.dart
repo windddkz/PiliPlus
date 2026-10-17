@@ -480,8 +480,10 @@ abstract final class Pref {
     return superResolutionType ?? SuperResolutionType.disable;
   }
 
-  static bool get preInitPlayer =>
-      _setting.get(SettingBoxKey.preInitPlayer, defaultValue: false);
+  static bool get preInitPlayer => _setting.get(
+    SettingBoxKey.preInitPlayer,
+    defaultValue: Platform.isAndroid && officialAudioBackend,
+  );
 
   static bool get mainTabBarView =>
       _setting.get(SettingBoxKey.mainTabBarView, defaultValue: false);
