@@ -32,6 +32,9 @@ public final class OfficialMediaCacheCheck {
             throw new AssertionError("Stale lease accepted");
         } catch (IllegalArgumentException expected) {
         }
+        var ladder = cache.acquire(key(9), 7, Long.MAX_VALUE);
+        assert ladder.trackBytes == 128L * 1024 * 1024 : "Unused qualities shrink the active track";
+        cache.release(ladder, false);
         var second = cache.acquire(key(2), 21, Long.MAX_VALUE);
         assert second.trackBytes * 21 < OfficialMediaCache.ENTRY_BYTES;
         var third = cache.acquire(key(3), 2, Long.MAX_VALUE);
@@ -75,6 +78,48 @@ public final class OfficialMediaCacheCheck {
         var interrupted = cache.acquire(key(7), 2, Long.MAX_VALUE);
         new OfficialMediaCache(root.toFile(), now::get, 3, 1000);
         assert !interrupted.directory.exists();
+        Path budgetRoot = Files.createDirectory(base.resolve("budget"));
+        OfficialMediaCache budget = new OfficialMediaCache(budgetRoot.toFile());
+        long ladderReservation = 7L * 128 * 1024 * 1024 + 1024 * 1024;
+        assert budget.acquire(key(1), 7, ladderReservation * 2 - 1) == null;
+        var a = budget.acquire(key(1), 21, Long.MAX_VALUE);
+        var b = budget.acquire(key(2), 21, Long.MAX_VALUE);
+        var c = budget.acquire(key(3), 21, Long.MAX_VALUE);
+        assert a != null && b != null && c != null;
+        assert budget.acquire(key(4), 2, Long.MAX_VALUE) == null;
+        budget.release(a, true);
+        var d = budget.acquire(key(4), 2, Long.MAX_VALUE);
+        assert d != null : "Idle entries must reserve actual bytes, not unused track quotas";
+        budget.release(b, false);
+        budget.release(c, false);
+        budget.release(d, false);
+        budget.clear();
+        Files.delete(budgetRoot);
+        Path priorityRoot = Files.createDirectory(base.resolve("priority"));
+        OfficialMediaCache priority = new OfficialMediaCache(priorityRoot.toFile(), now::get, 2, 1000);
+        var watched = priority.acquire(key(1), 2, Long.MAX_VALUE);
+        priority.markPlayed(watched);
+        priority.release(watched, true);
+        try {
+            priority.markPlayed(watched);
+            throw new AssertionError("Released lease promoted");
+        } catch (IllegalArgumentException expected) {
+        }
+        now.incrementAndGet();
+        var unseen = priority.acquire(key(2), 2, Long.MAX_VALUE);
+        priority.release(unseen, true);
+        now.incrementAndGet();
+        var replacement = priority.acquire(key(3), 2, Long.MAX_VALUE);
+        assert watched.directory.exists() && !unseen.directory.exists();
+        priority.release(replacement, true);
+        priority = new OfficialMediaCache(priorityRoot.toFile(), now::get, 2, 1000);
+        var afterRestart = priority.acquire(key(4), 2, Long.MAX_VALUE);
+        assert watched.directory.exists() && !replacement.directory.exists();
+        priority.release(afterRestart, true);
+        now.addAndGet(1000);
+        priority.prune();
+        assert priority.retained() == 0 && !watched.directory.exists();
+        Files.delete(priorityRoot);
         Files.delete(root);
         Files.delete(keep);
         Files.delete(base);

@@ -36,7 +36,7 @@ static int cache_index_valid(const char *map, const char *data) {
         return 0;
     int valid = !fstat(fd, &ms) && S_ISREG(ms.st_mode) && ms.st_size > 0 && ms.st_size <= 32768 &&
                 !lstat(data, &ds) && S_ISREG(ds.st_mode) && ds.st_size > 0 &&
-                ds.st_size <= 64 * 1024 * 1024;
+                ds.st_size <= 128 * 1024 * 1024;
     FILE *file = fdopen(fd, "r");
     if (!file) {
         close(fd);

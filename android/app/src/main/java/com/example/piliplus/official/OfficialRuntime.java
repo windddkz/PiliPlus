@@ -1311,6 +1311,9 @@ final class OfficialRuntime {
                 resourceListener(token, new Bundle(request), resourceUpdates));
         if (!Boolean.TRUE.equals(invoke(player, "switchItem", item)))
             throw new IOException("switchItem rejected");
+        OfficialMediaCache.Lease cache = itemCaches.get(item);
+        if (cache != null)
+            mediaCache.markPlayed(cache);
         route.start();
         describeRoute("route_selected");
         worker.postDelayed(() -> run(token, () -> {

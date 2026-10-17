@@ -10,11 +10,11 @@ import java.util.function.LongSupplier;
 /** Worker-owned cache leases; a native writer has exclusive access until its release completes. */
 @android.annotation.TargetApi(26)
 final class OfficialMediaCache {
-    static final long TRACK_BYTES = 64L * 1024 * 1024;
-    static final long ENTRY_BYTES = 128L * 1024 * 1024;
+    static final long TRACK_BYTES = 128L * 1024 * 1024;
+    static final long ENTRY_BYTES = 21 * TRACK_BYTES + 1024 * 1024;
     static final long MIN_FREE_BYTES = 200L * 1024 * 1024;
     static final int MAX_ENTRIES = 64;
-    static final long TOTAL_BYTES = 2L * 1024 * 1024 * 1024;
+    static final long TOTAL_BYTES = 8L * 1024 * 1024 * 1024;
     static final long TTL_MILLIS = 20 * 60 * 1000L;
     private final Path root;
     private final LongSupplier now;
@@ -26,7 +26,7 @@ final class OfficialMediaCache {
         final Path directory;
         long touched;
         Lease lease;
-        boolean discard;
+        boolean discard, played;
         boolean reusable = true;
         Entry(Path directory, long touched) {
             this.directory = directory;
@@ -36,13 +36,15 @@ final class OfficialMediaCache {
     static final class Lease {
         final File directory;
         final long trackBytes;
+        final long reservedBytes;
         final boolean reused;
         private final Entry entry;
         private Lease(Entry entry, int tracks, boolean reused) {
             this.entry = entry;
             this.directory = entry.directory.toFile();
-            // The remaining MiB covers the bounded per-track index files.
-            this.trackBytes = Math.min(TRACK_BYTES, (ENTRY_BYTES - 1024 * 1024) / tracks);
+            // Reserve every possible writer without reducing the active track for unused qualities.
+            this.trackBytes = TRACK_BYTES;
+            this.reservedBytes = tracks * TRACK_BYTES + 1024 * 1024;
             this.reused = reused;
         }
     }
@@ -70,6 +72,7 @@ final class OfficialMediaCache {
                         && Files.isRegularFile(complete, LinkOption.NOFOLLOW_LINKS)) {
                     Entry entry = new Entry(path, Files.getLastModifiedTime(complete).toMillis());
                     if (fresh(entry) && bounded(path)) {
+                        entry.played = Files.isRegularFile(path.resolve(".played"), LinkOption.NOFOLLOW_LINKS);
                         entries.put(key, entry);
                         continue;
                     }
@@ -92,11 +95,12 @@ final class OfficialMediaCache {
         Entry entry = entries.get(key);
         if (entry != null && entry.lease != null)
             return null;
+        long reservation = tracks * TRACK_BYTES + 1024 * 1024;
         long budget = Math.min(TOTAL_BYTES, Math.max(0, usableBytes / 2));
-        if (usableBytes < MIN_FREE_BYTES || budget < ENTRY_BYTES)
+        if (usableBytes < MIN_FREE_BYTES || budget < reservation)
             return null;
         while (entries.size() + (entry == null ? 1 : 0) > capacity
-                || reservedBytes(entry) > budget - ENTRY_BYTES) {
+                || reservedBytes(entry) > budget - reservation) {
             if (!evictOldest(entry))
                 return null;
             entry = entries.get(key);
@@ -117,6 +121,14 @@ final class OfficialMediaCache {
         return lease;
     }
 
+    void markPlayed(Lease lease) {
+        Entry entry = lease.entry;
+        if (entry.lease != lease || entries.get(entry.directory.getFileName().toString()) != entry)
+            throw new IllegalArgumentException("Unowned media cache lease");
+        entry.played = true;
+        entry.touched = now.getAsLong();
+    }
+
     void release(Lease lease, boolean keep) throws IOException {
         Entry entry = lease.entry;
         if (entry.lease != lease || entries.get(entry.directory.getFileName().toString()) != entry)
@@ -125,6 +137,8 @@ final class OfficialMediaCache {
         entry.lease = null;
         try {
             if (keep && entry.reusable && !entry.discard && bounded(entry.directory)) {
+                if (entry.played)
+                    Files.write(entry.directory.resolve(".played"), new byte[0]);
                 Path complete = entry.directory.resolve(".complete");
                 Files.write(complete, new byte[0], StandardOpenOption.CREATE_NEW);
                 entry.touched = now.getAsLong();
@@ -184,7 +198,7 @@ final class OfficialMediaCache {
             if (entry == exclude)
                 continue;
             if (entry.lease != null) {
-                bytes += ENTRY_BYTES;
+                bytes += entry.lease.reservedBytes;
             } else {
                 try (DirectoryStream<Path> files = Files.newDirectoryStream(entry.directory)) {
                     for (Path file : files)
@@ -204,7 +218,8 @@ final class OfficialMediaCache {
         Entry oldest = null;
         for (Entry entry : entries.values())
             if (entry != preserve && entry.lease == null
-                    && (oldest == null || entry.touched < oldest.touched))
+                    && (oldest == null || (oldest.played && !entry.played)
+                            || (oldest.played == entry.played && entry.touched < oldest.touched)))
                 oldest = entry;
         if (oldest == null)
             return false;
@@ -222,7 +237,7 @@ final class OfficialMediaCache {
             for (Path file : files) {
                 BasicFileAttributes attrs = Files.readAttributes(
                         file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-                if (!attrs.isRegularFile() || ++count > 43 || attrs.size() > ENTRY_BYTES - bytes)
+                if (!attrs.isRegularFile() || ++count > 44 || attrs.size() > ENTRY_BYTES - bytes)
                     return false;
                 bytes += attrs.size();
             }

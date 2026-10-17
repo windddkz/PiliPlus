@@ -74,6 +74,15 @@ int main(void) {
         f);
     fclose(f);
     assert(!cache_index_valid(map, data));
+    f = fopen(map, "w");
+    assert(f);
+    fputs(header, f);
+    fputs(entries[0], f);
+    fclose(f);
+    assert(!truncate(data, 128 * 1024 * 1024));
+    assert(cache_index_valid(map, data));
+    assert(!truncate(data, 128 * 1024 * 1024 + 1));
+    assert(!cache_index_valid(map, data));
     unlink(map);
     unlink(data);
     rmdir(directory);
