@@ -5,7 +5,7 @@ import tempfile
 
 repo = Path(__file__).resolve().parents[1]
 source = (repo/'android/official_audio/graph_adapter.c').read_text()
-function = source[source.index('static int replace('):source.index('static void fail(')]
+function = source[source.index('static int replace(uintptr_t *slot,'):source.index('static void fail(')]
 assert function.count('static int replace(') == 1
 stretcher = source[source.index('static void (*soundtouch_constructor)'):source.index('static int replace_stretcher(')]
 harness = r'''

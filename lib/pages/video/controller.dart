@@ -51,6 +51,7 @@ import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
 import 'package:PiliPlus/plugin/pl_player/models/heart_beat_type.dart';
 import 'package:PiliPlus/plugin/pl_player/models/play_status.dart';
 import 'package:PiliPlus/services/download/download_service.dart';
+import 'package:PiliPlus/services/service_locator.dart';
 import 'package:PiliPlus/utils/accounts.dart';
 import 'package:PiliPlus/utils/connectivity_utils.dart';
 import 'package:PiliPlus/utils/extension/context_ext.dart';
@@ -692,6 +693,10 @@ class VideoDetailController extends GetxController
   void updatePlayer() {
     final currentVideoQa = this.currentVideoQa.value;
     if (currentVideoQa == null) return;
+    final shouldPlay =
+        audioSessionHandler?.wantsPlayback(plPlayerController) ??
+        plPlayerController.playerStatus.isPlaying;
+    // This flag also keeps the player controls mounted while playback is paused.
     _autoPlay.value = true;
     playedTime = plPlayerController.videoPlayerController?.state.position;
     plPlayerController
@@ -724,7 +729,7 @@ class VideoDetailController extends GetxController
       );
     }
 
-    playerInit();
+    playerInit(autoplay: shouldPlay);
   }
 
   Future<void>? initPlayerIfNeeded(bool autoFullScreenFlag) {

@@ -23,6 +23,8 @@ typedef SourceResult (*Read)(void *);
 typedef void (*Ref)(void *,const void *);
 extern void graph_make_frame(void **,int,uint64_t,int,int,uintptr_t);
 static uintptr_t base;
+static int replace(uintptr_t *,uintptr_t,uintptr_t);
+#include "timeline_reset.h"
 static Read original;
 static int matches,active,enabled,errors;
 static uint64_t reads,s32_frames,converted_frames,samples,non_s32_frames,inexact_samples;
@@ -125,10 +127,13 @@ static SourceResult adapted(void *context){
            ((int (*)(void *))(base+0x139d80))(checker))
             ((int (*)(void *))(base+0x139d88))(checker);
     }
+    int64_t previous_pts=FIELD(context,0xb0,int64_t);
     SourceResult result=original(context);
+    if(result.status==0&&result.frame)notify_backward_pts(context,previous_pts,FIELD(result.frame,0x18,int64_t));
     pthread_mutex_lock(&lp_lock);pthread_mutex_lock(&lock);reads++;source_tid=gettid();
     void *old=result.frame;
     int reset_error=__atomic_load_n(&decoder_reset_error,__ATOMIC_RELAXED);
+    if(!reset_error)reset_error=__atomic_load_n(&timeline_reset_error,__ATOMIC_ACQUIRE);
     if(reset_error){if(old)release_frame(old);result.frame=NULL;result.status=reset_error;goto done;}
 again:
     if(result.status==0&&old){
@@ -228,7 +233,7 @@ static int replace_stretcher(int install){
     return replace((uintptr_t *)(base+0x2ca920),install?old:next,install?next:old);
 }
 #include "video_trace.h"
-static int (*const changes[])(int)={replace_source,replace_decoder,replace_clock_timestamp,replace_video_trace,replace_stretcher,replace_reset_flush};
+static int (*const changes[])(int)={replace_source,replace_decoder,replace_clock_timestamp,replace_video_trace,replace_stretcher,replace_reset_flush,replace_timeline_flush,replace_timeline_reset};
 static int installed;
 static void restore(JNIEnv *env){
     while(installed){
@@ -285,7 +290,7 @@ JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_startGraphAdapter(J
 }
 JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_getGraphState(JNIEnv *env,jclass cls){
     (void)cls;pthread_mutex_lock(&lp_lock);pthread_mutex_lock(&lock);
-    char out[512];snprintf(out,sizeof(out),"{\"active\":%s,\"errors\":%d,\"filter_error\":%d,\"sample_rate\":%d,\"channels\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"duplicate_eof_frames\":%llu,\"loudness_bypassed_for_codec\":%s}",active?"true":"false",errors+__atomic_load_n(&stretch_error,__ATOMIC_RELAXED)+(__atomic_load_n(&decoder_reset_error,__ATOMIC_RELAXED)!=0),lp_error,last_rate,last_channels,(unsigned long long)lp_frames,(unsigned long long)converted_frames,(unsigned long long)duplicate_eof_frames,lp_profile&&codec_bypasses_loudness(__atomic_load_n(&decoded_audio_codec,__ATOMIC_ACQUIRE))?"true":"false");
+    char out[512];snprintf(out,sizeof(out),"{\"active\":%s,\"errors\":%d,\"filter_error\":%d,\"sample_rate\":%d,\"channels\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"duplicate_eof_frames\":%llu,\"loudness_bypassed_for_codec\":%s}",active?"true":"false",errors+__atomic_load_n(&stretch_error,__ATOMIC_RELAXED)+(__atomic_load_n(&decoder_reset_error,__ATOMIC_RELAXED)!=0)+(__atomic_load_n(&timeline_reset_error,__ATOMIC_ACQUIRE)!=0),lp_error,last_rate,last_channels,(unsigned long long)lp_frames,(unsigned long long)converted_frames,(unsigned long long)duplicate_eof_frames,lp_profile&&codec_bypasses_loudness(__atomic_load_n(&decoded_audio_codec,__ATOMIC_ACQUIRE))?"true":"false");
     pthread_mutex_unlock(&lock);pthread_mutex_unlock(&lp_lock);return (*env)->NewStringUTF(env,out);
 }
 JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_finishGraphAdapter(JNIEnv *env,jclass cls){
@@ -293,7 +298,7 @@ JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_finishGraphAdapt
     restore(env);
     pthread_mutex_lock(&lp_lock);pthread_mutex_lock(&lock);active=0;lp_close();
     if(previous_frame){release_frame(previous_frame);previous_frame=NULL;}
-    char out[512];snprintf(out,sizeof(out),"{\"restored\":true,\"video_trace_enabled\":%s,\"errors\":%d,\"filter_error\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"filtered_samples\":%llu,\"duplicate_eof_frames\":%llu}",video_trace_enabled?"true":"false",errors+__atomic_load_n(&stretch_error,__ATOMIC_RELAXED)+(__atomic_load_n(&decoder_reset_error,__ATOMIC_RELAXED)!=0),lp_error,(unsigned long long)lp_frames,(unsigned long long)converted_frames,(unsigned long long)lp_samples,(unsigned long long)duplicate_eof_frames);
+    char out[512];snprintf(out,sizeof(out),"{\"restored\":true,\"video_trace_enabled\":%s,\"errors\":%d,\"filter_error\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"filtered_samples\":%llu,\"duplicate_eof_frames\":%llu}",video_trace_enabled?"true":"false",errors+__atomic_load_n(&stretch_error,__ATOMIC_RELAXED)+(__atomic_load_n(&decoder_reset_error,__ATOMIC_RELAXED)!=0)+(__atomic_load_n(&timeline_reset_error,__ATOMIC_ACQUIRE)!=0),lp_error,(unsigned long long)lp_frames,(unsigned long long)converted_frames,(unsigned long long)lp_samples,(unsigned long long)duplicate_eof_frames);
     pthread_mutex_unlock(&lock);pthread_mutex_unlock(&lp_lock);return (*env)->NewStringUTF(env,out);
 }
 
