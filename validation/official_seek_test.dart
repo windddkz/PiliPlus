@@ -148,6 +148,15 @@ void main() {
         urls: urls,
       );
       urls.clear();
+      final video = DashTrack(
+        source: 'https://chosen.example/video',
+        id: 120,
+        bandwidth: 1000,
+        codecs: 'hev1.2.4.L153.B0',
+        urls: const [],
+      );
+      expect(video.forSource(video.source)!['codecs'], 'hev1.2.4.L153.B0');
+      expect(video.forSource('https://other.example/video'), isNull);
       final info = track.forSource('https://chosen.example/a')!;
       expect(info['bandwidth'], 0);
       expect(info['backups'], ['https://backup.example/a']);

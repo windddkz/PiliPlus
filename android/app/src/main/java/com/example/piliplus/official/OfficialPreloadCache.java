@@ -48,7 +48,7 @@ final class OfficialPreloadCache<T> {
     T peek(String key) {
         if (broken || key == null) return null;
         for (Entry entry : entries.values()) {
-            if (entry.key.equals(key) && (entry.state == State.ADDING || entry.state == State.READY) &&
+            if (entry.key.equals(key) && entry.consumer == null && (entry.state == State.ADDING || entry.state == State.READY) &&
                     now.getAsLong()-entry.created < 30000) return entry.item;
         }
         return null;
@@ -81,32 +81,51 @@ final class OfficialPreloadCache<T> {
         try { backend.add(entry.added,entry.task,item); }
         catch (Exception error) { fail(error); return false; }
         scheduler.after(30000, () -> {
-            if (entries.get(entry.task) == entry &&
+            if (entries.get(entry.task) == entry && entry.consumer == null &&
                     (entry.state == State.ADDING || entry.state == State.READY)) remove(entry);
         });
         return true;
     }
 
     boolean take(String key, Consumer<T> consumer) {
+        return take(key, consumer, false);
+    }
+    boolean takeReady(String key, Consumer<T> consumer) {
+        return take(key, consumer, true);
+    }
+    private boolean take(String key, Consumer<T> consumer, boolean waitReady) {
         if (broken) return false;
         for (Entry entry : entries.values()) {
             if (!entry.key.equals(key)) continue;
+            if (entry.consumer != null) return false;
             if ((entry.state != State.ADDING && entry.state != State.READY) || now.getAsLong()-entry.created >= 30000) {
                 if (entry.state == State.ADDING || entry.state == State.READY) remove(entry);
                 return false;
             }
-            // An in-progress item is reusable only after native confirms exclusive ownership.
-            entry.state=State.DETACHING; entry.consumer=consumer; entry.movement=++serial;
-            try { backend.detach(entry.movement,entry.task,entry.item); }
-            catch (Exception error) { fail(error); }
-            watch(entry);
+            entry.consumer=consumer;
+            if (waitReady && entry.state == State.ADDING) {
+                scheduler.after(20000, () -> {
+                    if (entries.get(entry.task) == entry && entry.state == State.ADDING && entry.consumer != null) {
+                        remove(entry);
+                        fail(new IllegalStateException("preload_ready_timeout"));
+                    }
+                });
+            } else detach(entry);
             return true;
         }
         return false;
     }
 
+    private void detach(Entry entry) {
+        // READY metadata still belongs to the preloader until its exact DETACHED acknowledgement.
+        entry.state=State.DETACHING; entry.movement=++serial;
+        try { backend.detach(entry.movement,entry.task,entry.item); }
+        catch (Exception error) { fail(error); }
+        watch(entry);
+    }
+
     private void remove(Entry entry) {
-        entry.state=State.REMOVING; entry.movement=++serial;
+        entry.state=State.REMOVING; entry.consumer=null; entry.movement=++serial;
         try {
             backend.interrupt(entry.item);
             backend.remove(entry.movement,entry.task,entry.item);
@@ -139,6 +158,9 @@ final class OfficialPreloadCache<T> {
             entries.remove(task);
             if (type.equals("DETACHED")) entry.consumer.accept(entry.item);
             else try { backend.release(entry.item); } catch (Exception failure) { fail(failure); }
-        } else if (ready) entry.state=State.READY;
+        } else if (ready) {
+            entry.state=State.READY;
+            if (entry.consumer != null && !broken) detach(entry);
+        }
     }
 }

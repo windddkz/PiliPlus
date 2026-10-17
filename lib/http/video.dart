@@ -130,6 +130,7 @@ abstract final class VideoHttp {
           source: videoUrl,
           id: selected.video.id,
           bandwidth: selected.video.bandWidth,
+          codecs: selected.video.codecs,
           urls: selected.video.playUrls,
         ),
         audioTrack: DashTrack(

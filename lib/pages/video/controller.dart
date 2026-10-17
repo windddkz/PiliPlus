@@ -709,6 +709,7 @@ class VideoDetailController extends GetxController
       source: videoUrl!,
       id: firstVideo.id,
       bandwidth: firstVideo.bandWidth,
+      codecs: firstVideo.codecs,
       urls: firstVideo.playUrls,
     );
 
@@ -884,6 +885,7 @@ class VideoDetailController extends GetxController
           source: videoUrl,
           id: video.id,
           bandwidth: video.bandWidth,
+          codecs: video.codecs,
           urls: video.playUrls,
         ),
         audioTrack: audio == null
@@ -1077,6 +1079,7 @@ class VideoDetailController extends GetxController
         source: videoUrl!,
         id: firstVideo.id,
         bandwidth: firstVideo.bandWidth,
+        codecs: firstVideo.codecs,
         urls: firstVideo.playUrls,
       );
 

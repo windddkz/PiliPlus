@@ -33,12 +33,14 @@ class DashTrack {
   final String source;
   final int id;
   final int? bandwidth;
+  final String? codecs;
   final List<String> urls;
 
   DashTrack({
     required this.source,
     required this.id,
     required this.bandwidth,
+    this.codecs,
     required Iterable<String> urls,
   }) : urls = List.unmodifiable(urls);
 
@@ -48,6 +50,7 @@ class DashTrack {
     return {
       'source': source,
       'id': id,
+      'codecs': ?codecs,
       'bandwidth':
           bandwidth != null && bandwidth! >= 0 && bandwidth! <= 0x7fffffff
           ? bandwidth!

@@ -4,11 +4,16 @@ import java.net.URI;
 import java.util.*;
 
 final class OfficialStream {
-    final String source;
+    final String source, codecs;
     final int id, bandwidth;
     final List<String> backups;
 
     OfficialStream(String actual, Object source, Object id, Object bandwidth, Object backups) {
+        this(actual,source,id,bandwidth,backups,null);
+    }
+    OfficialStream(String actual, Object source, Object id, Object bandwidth, Object backups,Object codecs) {
+        if(codecs!=null && (!(codecs instanceof String) || ((String)codecs).length()>256))throw new IllegalArgumentException("Invalid codec metadata");
+        this.codecs=(String)codecs;
         if(!Objects.equals(actual,source) || !(source instanceof String))
             throw new IllegalArgumentException("Stream metadata belongs to another source");
         this.source=(String)source;validateUrl(this.source);
@@ -22,6 +27,14 @@ final class OfficialStream {
             if(!url.equals(this.source))unique.add(url);
         }
         this.backups=Collections.unmodifiableList(new ArrayList<>(unique));
+    }
+
+    int videoCodec() {
+        if(codecs==null)return -1;
+        if(codecs.startsWith("avc1."))return 0;
+        if(codecs.startsWith("hev1.") || codecs.startsWith("hvc1.") || codecs.startsWith("dvh1.") || codecs.startsWith("dvhe."))return 1;
+        if(codecs.startsWith("av01."))return 2;
+        return -1;
     }
 
     private static int integer(Object value,int min) {
