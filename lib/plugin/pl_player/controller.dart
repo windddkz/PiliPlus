@@ -91,7 +91,11 @@ class PlPlayerController
     final revision = _sourceRevision;
     await _fallback;
     await restoreReclaimedPlayer();
-    if (!_currentSource(revision) || !audioFocusAvailable) return;
+    if (!_currentSource(revision) ||
+        !audioFocusAvailable ||
+        !(audioSessionHandler?.wantsPlayback(this) ?? true)) {
+      return;
+    }
     await _videoPlayerController?.play();
     if (audioFocusAvailable) playerStatus = .playing;
   }
