@@ -19,7 +19,13 @@ public final class FragmentHdrCheck {
         throw new AssertionError("Malformed colour metadata accepted");
     }
     public static void main(String[] args) throws Exception {
-        byte[] pq=Files.readAllBytes(Paths.get(args[0])),dv=Files.readAllBytes(Paths.get(args[1]));
+        byte[] pq=Files.readAllBytes(Paths.get(args[0])),dv=Files.readAllBytes(Paths.get(args[1])),dv5=Files.readAllBytes(Paths.get(args[2]));
+        assert FragmentIndex.inspectInfo(dv5,dv5.length).codec.equals("HEVC");
+        assert FragmentIndex.inspectInfo(dv5,dv5.length).hdr;
+        byte[] dvhe=dv5.clone();int dvTag=find(dvhe,"dvh1");
+        System.arraycopy("dvhe".getBytes(StandardCharsets.US_ASCII),0,dvhe,dvTag,4);
+        assert FragmentIndex.inspectInfo(dvhe,dvhe.length).codec.equals("HEVC");
+        assert FragmentIndex.inspectInfo(dvhe,dvhe.length).hdr;
         assert FragmentIndex.inspectInfo(pq,pq.length).codec.equals("HEVC");
         assert FragmentIndex.inspectInfo(pq,pq.length).hdr;
         assert FragmentIndex.inspectInfo(dv,dv.length).hdr;
@@ -35,6 +41,6 @@ public final class FragmentHdrCheck {
         assert !FragmentIndex.inspectInfo(b,b.length).hdr;
         b=dv.clone();int d=find(b,"dvvC");System.arraycopy("free".getBytes(StandardCharsets.US_ASCII),0,b,d,4);
         assert !FragmentIndex.inspectInfo(b,b.length).hdr;
-        System.out.println("Actual PQ/Dolby headers, HLG/SDR decisions and malformed child rejection passed");
+        System.out.println("Actual PQ/Dolby profile8/profile5 headers, HLG/SDR decisions and malformed child rejection passed");
     }
 }

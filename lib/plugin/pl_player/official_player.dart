@@ -50,6 +50,7 @@ class OfficialPlayer extends PlatformPlayer {
     'requested_with_scenes' => '官方响度：已请求场景目标处理',
     'requested_without_scenes' => '官方响度：已请求音源目标处理',
     'disabled' => '官方响度：关闭',
+    'dolby_codec_bypass' => '官方响度：杜比音轨沿用官方跳过规则',
     'pending' => '官方响度：等待当前音源准备',
     'missing_metadata' => '官方响度：缺少当前音源元数据',
     'zero_excluded_by_official_gate' => '官方响度：零值被官方启用条件排除',

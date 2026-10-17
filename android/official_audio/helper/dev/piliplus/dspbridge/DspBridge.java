@@ -8,7 +8,7 @@ public final class DspBridge {
     public static native String getGraphState();
     public static native int finishVideoTrace(String path);
     public static native String finishGraphAdapter();
-    public static native void startDspRoute(int endpoint, int virtualizer);
+    public static native void startDspRoute(int endpoint, int virtualizer, boolean hardwareDolby);
     public static native String getDspState();
     public static native String finishDspRoute();
 }

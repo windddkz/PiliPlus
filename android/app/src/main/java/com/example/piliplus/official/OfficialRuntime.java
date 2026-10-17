@@ -279,7 +279,8 @@ final class OfficialRuntime {
                 com.example.piliplus.BuildConfig.DEBUG && request.getBoolean("videoTrace",false));graphActive=true;
 
             stage("dsp_route");
-            bridge("startDspRoute",appliedEndpoint,virtualizer);dspActive=true;
+            boolean hardwareDolby=(Boolean)invoke(cls("tv.danmaku.ijk.media.player.IjkCodecHelper"),"isEac3MediaCodecSupport");
+            bridge("startDspRoute",appliedEndpoint,virtualizer,hardwareDolby);dspActive=true;
             stage("player_create");
             player=construct("com.bilibili.ijk.player.IJKMediaPlayer");
             for(Object[] binding:new Object[][]{{"setOnPreparedCallback",1,"prepared"},{"setOnCompletionCallback",1,"completed"},{"setOnErrorCallback",2,"error"},
@@ -373,7 +374,7 @@ final class OfficialRuntime {
             b.putString("audioCodec",dsp.getString("audio_codec"));b.putBoolean("dolbyControlsApplicable",dsp.getInt("configured_decoders")>0);
             b.putLong("nativeDolbyEndpoint",dsp.getInt("endpoint"));b.putInt("sampleRate",graph.getInt("sample_rate"));
             b.putString("channelLayout",Integer.toString(graph.getInt("channels")));
-            b.putString("loudnessMode",loudnessMode);b.putString("loudnessState",loudness.reason);b.putString("requestedAudioFilter",loudness.filter);
+            b.putString("loudnessMode",loudnessMode);b.putString("loudnessState",graph.getBoolean("loudness_bypassed_for_codec")?"dolby_codec_bypass":loudness.reason);b.putString("requestedAudioFilter",loudness.filter);
             b.putDouble("requestedLoudnessGainDb",loudness.appInGainDb);if(Double.isFinite(loudness.target))b.putDouble("loudnessTarget",loudness.target);
             b.putString("nativeEngine","audio_engine");b.putLong("adaptedFrames",graph.getLong("filtered_frames")+graph.getLong("converted_frames"));
             emit(b);heartbeat(token);

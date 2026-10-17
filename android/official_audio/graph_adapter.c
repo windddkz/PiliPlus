@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <android/log.h>
+#include <libavcodec/avcodec.h>
 
 #define FIELD(p,o,T) (*(T *)((char *)(p)+(o)))
 typedef struct {int32_t status;uint32_t padding;void *frame;int64_t serial,queue_serial;uint64_t extra[5];} SourceResult;
@@ -69,9 +70,16 @@ static int last_rate,last_channels;
 static int (*receive_original)(void *,AVFrame *);
 static void (*flush_original)(void *);
 static int filter_tid,source_tid;
+static int decoded_audio_codec;
+static int codec_bypasses_loudness(int codec){
+ // Official 9.14 audio_thread supplies no custom af for these Dolby codecs.
+ return codec==AV_CODEC_ID_AC3||codec==AV_CODEC_ID_EAC3||codec==AV_CODEC_ID_AC4;
+}
 static int receive_adapted(void *context,AVFrame *frame){
  int rc=receive_original(context,frame);
  if(rc<0||frame->sample_rate<=0||frame->nb_samples<=0)return rc;
+ // One audio stream per owned player; a source change recreates the player.
+ __atomic_store_n(&decoded_audio_codec,((AVCodecContext *)context)->codec_id,__ATOMIC_RELEASE);
  return rc;
 }
 static void flush_adapted(void *context){
@@ -139,7 +147,7 @@ again:
         uintptr_t side_begin=FIELD(old,0xb8,uintptr_t),side_end=FIELD(old,0xc0,uintptr_t);
         if(side_end>side_begin){side_data_frames++;side_data_records+=(side_end-side_begin)/56;}
         last_rate=FIELD(old,0x5c,int);last_channels=channels_seen;
-        if(lp_profile){
+        if(lp_profile&&!codec_bypasses_loudness(__atomic_load_n(&decoded_audio_codec,__ATOMIC_ACQUIRE))){
             filter_tid=gettid();uint64_t begin=monotonic_ns();
             void *filtered=filter_source_frame(old,context);
             uint64_t elapsed=monotonic_ns()-begin;filter_total_ns+=elapsed;
@@ -246,6 +254,7 @@ JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_startGraphAdapter(J
     dlclose(stretch_lib);
     if(!soundtouch_constructor||!soundtouch_setting){lp_close();fail(env,"Original stretcher APIs unavailable");return;}
     stretch_error=0;
+    decoded_audio_codec=AV_CODEC_ID_NONE;
     lp_profile=loudness_enabled?1:0;lp_metadata_gain_db=gain_db;clock_diagnostics=diagnostics;video_trace_enabled=video_diagnostics;
     original=(Read)(base+0x159d70);enabled=trim_eof=1;errors=0;
     filter_tid=source_tid=0;filter_total_ns=filter_max_ns=filter_over_40ms=0;
@@ -265,7 +274,7 @@ JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_startGraphAdapter(J
 }
 JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_getGraphState(JNIEnv *env,jclass cls){
     (void)cls;pthread_mutex_lock(&lp_lock);pthread_mutex_lock(&lock);
-    char out[512];snprintf(out,sizeof(out),"{\"active\":%s,\"errors\":%d,\"filter_error\":%d,\"sample_rate\":%d,\"channels\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"duplicate_eof_frames\":%llu}",active?"true":"false",errors+__atomic_load_n(&stretch_error,__ATOMIC_RELAXED)+(__atomic_load_n(&decoder_reset_error,__ATOMIC_RELAXED)!=0),lp_error,last_rate,last_channels,(unsigned long long)lp_frames,(unsigned long long)converted_frames,(unsigned long long)duplicate_eof_frames);
+    char out[512];snprintf(out,sizeof(out),"{\"active\":%s,\"errors\":%d,\"filter_error\":%d,\"sample_rate\":%d,\"channels\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"duplicate_eof_frames\":%llu,\"loudness_bypassed_for_codec\":%s}",active?"true":"false",errors+__atomic_load_n(&stretch_error,__ATOMIC_RELAXED)+(__atomic_load_n(&decoder_reset_error,__ATOMIC_RELAXED)!=0),lp_error,last_rate,last_channels,(unsigned long long)lp_frames,(unsigned long long)converted_frames,(unsigned long long)duplicate_eof_frames,lp_profile&&codec_bypasses_loudness(__atomic_load_n(&decoded_audio_codec,__ATOMIC_ACQUIRE))?"true":"false");
     pthread_mutex_unlock(&lock);pthread_mutex_unlock(&lp_lock);return (*env)->NewStringUTF(env,out);
 }
 JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_finishGraphAdapter(JNIEnv *env,jclass cls){

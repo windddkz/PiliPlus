@@ -67,7 +67,7 @@ final class FragmentIndex {
                 String entry = type(bytes, at + 20);
                 switch (entry) {
                     case "avc1": case "avc3": found = "H264"; break;
-                    case "hvc1": case "hev1": found = "HEVC"; break;
+                    case "hvc1": case "hev1": case "dvh1": case "dvhe": found = "HEVC"; break;
                     case "av01": found = "AV1"; break;
                     case "mp4a": found = "AAC"; break;
                     case "fLaC": found = "FLAC"; break;

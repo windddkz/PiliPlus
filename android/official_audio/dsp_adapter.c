@@ -11,6 +11,7 @@
 #include <libavcodec/codec.h>
 #include <libavutil/opt.h>
 #include "slot_pair.h"
+#include "dolby_decoder_policy.h"
 static uintptr_t player_base;static int player_matches;
 static int locate_player(struct dl_phdr_info *i,size_t n,void *p){(void)n;(void)p;const char *s=strrchr(i->dlpi_name,'/');s=s?s+1:i->dlpi_name;if(!strcmp(s,"libijk.so")){player_base=i->dlpi_addr;player_matches++;}return 0;}
 static int matches_player(void *find){player_base=0;player_matches=0;dl_iterate_phdr(locate_player,NULL);return player_matches==1&&*(void **)(player_base+0x2ca600)==find;}
@@ -71,10 +72,14 @@ static const AVCodec *routed_find(int id){
  return codec;
 }
 static uintptr_t original_slots[2],routed_slots[2];
+static int32_t saved_hardware_caps[2];
+static int software_policy(int install){
+ return dolby_software_policy((int32_t *)(player_base+0x2d1550),saved_hardware_caps,install);
+}
 static int route_pair(int install,int (*protect)(void *,size_t,int)){
  return patch_pair((uintptr_t *)(player_base+0x2ca600),(uintptr_t *)(player_base+0x2ca5f0),install?original_slots:routed_slots,install?routed_slots:original_slots,protect);
 }
-static const char *prepare_route(int endpoint,int virtualizer){
+static const char *prepare_route(int endpoint,int virtualizer,int hardware_dolby){
  if(open_runtime(&route_runtime))return "Locked player runtime unavailable";
  void *lib=route_runtime.lib,*ext=route_runtime.ext;
  original_find=dlsym(lib,"avcodec_find_decoder");const AVCodec *(*named)(const char *)=dlsym(lib,"avcodec_find_decoder_by_name");
@@ -83,25 +88,29 @@ static const char *prepare_route(int endpoint,int virtualizer){
  if(!named||!ac3||!eac3||!original_open||!set_ptr||!set_int)return "Original option bridge unavailable";
  dolby_ac3=named("ijkac3");dolby_eac3=named("ijkeac3");
  if(!dolby_ac3||!dolby_eac3||dolby_ac3->id!=86019||dolby_eac3->id!=86056||memcmp(dolby_ac3,ac3,192)||memcmp(dolby_eac3,eac3,192))return "Original Dolby decoders not registered";
- int32_t values[9]={endpoint,virtualizer,6,-14,65535,-32,0,0,0};memcpy(exec_params,values,sizeof(values));
+ // Official IjkMediaPlayerItem clears software enhancement when EAC3 MediaCodec is available.
+ int32_t values[9]={endpoint,hardware_dolby?0:virtualizer,hardware_dolby?0:6,-14,65535,-32,0,0,0};memcpy(exec_params,values,sizeof(values));
  original_slots[0]=(uintptr_t)original_find;original_slots[1]=(uintptr_t)original_open;
  routed_slots[0]=(uintptr_t)routed_find;routed_slots[1]=(uintptr_t)routed_open;
  atomic_store(&selected_audio_codec,NULL);atomic_store(&configured,0);atomic_store(&open_failures,0);atomic_store(&routed_ac3,0);atomic_store(&routed_eac3,0);atomic_store(&delegated,0);
  return NULL;
 }
-JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_startDspRoute(JNIEnv *e,jclass cls,jint endpoint,jint virtualizer){
+JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_startDspRoute(JNIEnv *e,jclass cls,jint endpoint,jint virtualizer,jboolean hardware_dolby){
  (void)cls;if((endpoint!=1&&endpoint!=2)||(virtualizer!=0&&virtualizer!=1)){fail(e,"Invalid owned Dolby test controls");return;}if(routing){fail(e,"DSP route already active");return;}
- const char *error=prepare_route(endpoint,virtualizer);
+ const char *error=prepare_route(endpoint,virtualizer,hardware_dolby);
  if(error){close_runtime(&route_runtime);fail(e,error);return;}
+ // Installed before player creation; restored only after all decoder threads have stopped.
+ if(software_policy(1)){close_runtime(&route_runtime);fail(e,"Unexpected Dolby decoder policy state");return;}
  int rc=route_pair(1,mprotect);
  if(rc==-2)(*e)->FatalError(e,"DSP install page protection rollback failed in owned process");
- if(rc){close_runtime(&route_runtime);fail(e,"DSP pair install failed without pointer changes");return;}
+ if(rc){if(software_policy(0))(*e)->FatalError(e,"Dolby decoder policy rollback failed");close_runtime(&route_runtime);fail(e,"DSP pair install failed without pointer changes");return;}
  routing=1;
 }
 JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_finishDspRoute(JNIEnv *e,jclass cls){
  (void)cls;if(!routing){fail(e,"DSP route is not active");return NULL;}
  int rc=route_pair(0,mprotect);if(rc==-1)rc=route_pair(0,mprotect);
  if(rc)(*e)->FatalError(e,"DSP restore failed in owned process; refusing stale callbacks");
+ if(software_policy(0))(*e)->FatalError(e,"Dolby decoder policy restoration failed");
  routing=0;close_runtime(&route_runtime);char result[300];snprintf(result,sizeof(result),"{\"ac3_calls\":%u,\"eac3_calls\":%u,\"delegated_calls\":%u,\"slot_restored\":true,\"configured_decoders\":%u,\"open_failures\":%u,\"endpoint\":%d,\"virtualizer\":%d,\"owned_handles\":%d}",atomic_load(&routed_ac3),atomic_load(&routed_eac3),atomic_load(&delegated),atomic_load(&configured),atomic_load(&open_failures),exec_params[0],exec_params[1],owned_handles);
  return (*e)->NewStringUTF(e,result);
 }
