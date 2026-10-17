@@ -46,6 +46,43 @@ void main() {
   Future<OfficialPlayer> create() => OfficialPlayer.create(
     (reason) => throw StateError('Unexpected fallback: $reason'),
   );
+  test('warm-up never opens media or marks playback ready', () async {
+    final p = await create();
+    await p.warmUp();
+    await emit({'event': 'runtime_ready', 'load': 0});
+    expect(calls.map((c) => c.method), ['availability', 'create', 'warmUp']);
+    expect(calls.last.arguments, {'session': 7});
+    expect(p.state.playing, false);
+    expect(p.isPreparing, false);
+    expect(p.audioSession, null);
+    await p.dispose();
+    await expectLater(p.warmUp(), throwsStateError);
+  });
+  test('idle process death remains disposable before a new create', () async {
+    final p = await create();
+    await p.warmUp();
+    await emit({'event': 'error', 'error': 'native_process_died', 'load': 0});
+    expect(p.processDead, true);
+    expect(p.state.playing, false);
+    await p.dispose();
+    final next = await create();
+    expect(next.processDead, false);
+    await next.dispose();
+  });
+  test('failed warm-up can be disposed without opening media', () async {
+    final p = await create();
+    messenger.setMockMethodCallHandler(commands, (call) async {
+      calls.add(call);
+      if (call.method == 'warmUp') {
+        throw PlatformException(code: 'native_command_failed');
+      }
+      return null;
+    });
+    await expectLater(p.warmUp(), throwsA(isA<PlatformException>()));
+    await p.dispose();
+    expect(calls.any((c) => c.method == 'open' || c.method == 'play'), false);
+    expect(calls.last.method, 'dispose');
+  });
   test(
     'fallback retains failure stage without source URLs or exception messages',
     () {

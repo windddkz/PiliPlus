@@ -932,6 +932,10 @@ class VideoDetailController extends GetxController
       return initPlayerIfNeeded(autoFullScreenFlag);
     }
     if (isQuerying && !fromReset) return;
+    // Optional warm-up must not fail the independent URL request.
+    unawaited(
+      plPlayerController.warmUpOfficialRuntime().catchError((Object _) {}),
+    );
     final request = ++_videoUrlRequest;
     isQuerying = true;
     try {

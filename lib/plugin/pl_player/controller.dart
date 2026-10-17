@@ -109,6 +109,8 @@ class PlPlayerController
   }
 
   PlatformPlayer? _videoPlayerController;
+  // Idle runtime must not expose playback UI before a source exists.
+  OfficialPlayer? _warmedOfficial;
   static Future<void>? _pendingOfficialDisposal;
   final backendRevision = 0.obs;
   String? _officialFallbackReason;
@@ -167,6 +169,9 @@ class PlPlayerController
     final stopping = _cancelPreparingOfficial();
     return _enqueuePlayer(() async {
       await stopping;
+      final warmed = _warmedOfficial;
+      _warmedOfficial = null;
+      if (warmed != null) await _disposeBackend(warmed);
       if (_currentSource(revision)) _processing = false;
       if (stopping != null) backendRevision.value++;
       final player = _videoPlayerController;
@@ -975,6 +980,47 @@ class PlPlayerController
     }
   }
 
+  Future<void> warmUpOfficialRuntime() {
+    if (!Platform.isAndroid ||
+        !Pref.officialAudioBackend ||
+        _forceMpv ||
+        enableAudioNormalization ||
+        superResolutionType.value != SuperResolutionType.disable ||
+        Pref.playerVolume > 100) {
+      return Future.value();
+    }
+    return _enqueuePlayer(() async {
+      if (_playerCount == 0 ||
+          _videoPlayerController != null ||
+          _warmedOfficial != null) {
+        return;
+      }
+      OfficialPlayer? candidate;
+      try {
+        await _pendingOfficialDisposal;
+        await _backendDisposal;
+        if (_playerCount == 0) return;
+        final player = candidate = await OfficialPlayer.create(
+          (reason) => _fallbackToMpv(reason, expected: candidate),
+        );
+        await player.warmUp();
+        await player.setVolume(Pref.playerVolume);
+        if (_playerCount == 0) {
+          await _disposeBackend(player);
+          return;
+        }
+        _warmedOfficial = player;
+      } catch (error) {
+        if (candidate != null) await _disposeBackend(candidate);
+        if (kDebugMode) {
+          debugPrint(
+            'Official warm-up skipped: ${OfficialPlayer.failureCode(error)}',
+          );
+        }
+      }
+    });
+  }
+
   Future<PlatformPlayer> _initPlayer() async {
     assert(_videoPlayerController == null);
     await _pendingOfficialDisposal;
@@ -993,9 +1039,14 @@ class PlPlayerController
         _officialFallbackReason = '当前均衡、超分辨率或放大设置需要 mpv';
         _forceMpv = true;
       } else {
-        OfficialPlayer? candidate;
+        OfficialPlayer? candidate = _warmedOfficial;
+        _warmedOfficial = null;
         try {
-          final player = candidate = await OfficialPlayer.create(
+          if (candidate != null && candidate.processDead) {
+            await _disposeBackend(candidate);
+            candidate = null;
+          }
+          final player = candidate ??= await OfficialPlayer.create(
             (reason) => _fallbackToMpv(reason, expected: candidate),
           );
           await player.setVolume(Pref.playerVolume);
@@ -1010,6 +1061,9 @@ class PlPlayerController
         }
       }
     }
+    final unusedWarmUp = _warmedOfficial;
+    _warmedOfficial = null;
+    if (unusedWarmUp != null) await _disposeBackend(unusedWarmUp);
     if (_playerCount == 0) {
       throw StateError('Player closed before initialization');
     }
@@ -2104,6 +2158,9 @@ class PlPlayerController
     }
     final player = _videoPlayerController;
     if (player != null) _disposeBackend(player);
+    final warmed = _warmedOfficial;
+    _warmedOfficial = null;
+    if (warmed != null) _disposeBackend(warmed);
     // Include players whose asynchronous creation finishes after this dispose.
     final disposal = _pendingOfficialDisposal = () async {
       await _playerCommands;

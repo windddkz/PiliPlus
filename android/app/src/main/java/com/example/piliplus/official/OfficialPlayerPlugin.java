@@ -255,7 +255,7 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                 data.putLong("load",number(call,"load",-1).longValue());
                 data.putBoolean("flipX",(Boolean)call.argument("flipX"));
                 data.putBoolean("flipY",(Boolean)call.argument("flipY"));break;
-            case "play": case "pause": break;
+            case "play": case "pause": case "warmUp": break;
             case "dispose": closing=true;cancelWaitingOpen("disposed");send("close",data,result,this::cleanup);return;
             default: result.notImplemented(); return;
         }
@@ -306,7 +306,7 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                 }
             }, 3000);
         };
-        pending.put(id, new Pending(op, result, success, timeout)); ui.postDelayed(timeout, op.equals("open") ? 45000 : 8000);
+        pending.put(id, new Pending(op, result, success, timeout)); ui.postDelayed(timeout, op.equals("open") || op.equals("warmUp") ? 45000 : 8000);
         data.putString("op", op); data.putLong("session", session);
         Message message = Message.obtain(null, OfficialPlaybackService.COMMAND, id, 0); message.setData(data); message.replyTo = receiver;
         try { remote.send(message); } catch (RemoteException e) { died("native_process_died"); }

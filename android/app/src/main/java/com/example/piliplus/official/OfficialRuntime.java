@@ -116,7 +116,7 @@ final class OfficialRuntime {
         if(!expected.equals(hash(image)))throw new SecurityException("Cached player image mismatch");
         return folder;
     }
-    private void initialize() throws Exception {
+    void initialize() throws Exception {
         if(loader!=null)return;
         if(initAttempted)throw new IllegalStateException("Runtime initialization previously failed");
         initAttempted=true;

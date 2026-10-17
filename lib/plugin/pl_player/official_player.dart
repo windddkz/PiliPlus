@@ -53,6 +53,7 @@ class OfficialPlayer extends PlatformPlayer {
   Future<void>? _disposing;
   bool _disposed = false;
   bool _dead = false;
+  bool get processDead => _dead;
   bool processReclaimed = false;
   bool _ducked = false;
   int _volumeRevision = 0;
@@ -154,6 +155,8 @@ class OfficialPlayer extends PlatformPlayer {
       rethrow;
     }
   }
+
+  Future<void> warmUp() => _send('warmUp');
 
   Future<void> _send(String method, [Map<String, Object?> data = const {}]) {
     if (_disposed || (_disposing != null && method != 'dispose')) {
