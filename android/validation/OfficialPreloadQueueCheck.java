@@ -123,6 +123,7 @@ public final class OfficialPreloadQueueCheck {
                 "Actual cached preparation: other candidates retained, ACK ownership and late cancellation passed");
     }
     public static void main(String[] args) throws Exception {
+        storedPositionsFollowWrites();
         OfficialRuntime priorityRuntime = new OfficialRuntime(context(), null, null);
         Method priority = OfficialRuntime.class.getDeclaredMethod("preloadPriority", String.class);
         priority.setAccessible(true);
@@ -254,6 +255,16 @@ public final class OfficialPreloadQueueCheck {
         source.putString("source", "https://example.invalid/v");
         source.putString("audio", "https://example.invalid/a");
         String original = (String) identity.invoke(runtime, source, false);
+        String beginning = (String) identity.invoke(runtime, source, true);
+        Set<String> positions = new HashSet<>();
+        positions.add(beginning);
+        for (long position : new long[] {10000, 30000, 3000, 120000}) {
+            source.putLong("position", position);
+            check(original.equals(identity.invoke(runtime, source, false)));
+            check(positions.add((String) identity.invoke(runtime, source, true)));
+        }
+        source.putLong("position", 0);
+        check(beginning.equals(identity.invoke(runtime, source, true)));
         source.putLong("position", 12345);
         check(original.equals(identity.invoke(runtime, source, false)));
         for (String key : new String[] {"source", "audio", "preloadToken"}) {
@@ -276,5 +287,41 @@ public final class OfficialPreloadQueueCheck {
         selectedWithRetention();
         System.out.println(
                 "Actual queue: bounded retention, wrong ACK, expiry, duplicates, foreground priority, permit expiry, account invalidation and media identity passed");
+    }
+    static void storedPositionsFollowWrites() throws Exception {
+        java.nio.file.Path root = java.nio.file.Files.createTempDirectory(
+                java.nio.file.Path.of("/data/local/tmp"), "piliplus-position-check-");
+        OfficialMediaCache disk = new OfficialMediaCache(root.toFile());
+        try {
+            OfficialRuntime runtime = new OfficialRuntime(context(), null, null);
+            field("mediaCache").set(runtime, disk);
+            @SuppressWarnings("unchecked")
+            Map<String, String> stored = (Map<String, String>) field("storedPreloads").get(runtime);
+            String media = "a".repeat(64), other = "b".repeat(64);
+            stored.put("position-0", media);
+            stored.put("position-10000", media);
+            stored.put("other-video", other);
+            Method acquire = OfficialRuntime.class.getDeclaredMethod(
+                    "acquireMediaCache", String.class, int.class, long.class);
+            acquire.setAccessible(true);
+            OfficialMediaCache.Lease writer = (OfficialMediaCache.Lease) acquire.invoke(
+                    runtime, media, 2, 100L * 1024 * 1024 * 1024);
+            check(writer != null);
+            // A writer may replace cached ranges; previous target positions need preparation again.
+            check(!stored.containsKey("position-0") && !stored.containsKey("position-10000"));
+            check(stored.get("other-video").equals(other));
+            stored.put("new-position", media);
+            check(acquire.invoke(runtime, media, 2, 100L * 1024 * 1024 * 1024) == null);
+            check(stored.get("new-position").equals(media));
+            disk.release(writer, false);
+        } finally {
+            disk.clear();
+            try (var paths = java.nio.file.Files.walk(root)) {
+                for (java.nio.file.Path path : paths.sorted(Comparator.reverseOrder()).toList())
+                    java.nio.file.Files.delete(path);
+            }
+        }
+        System.out.println(
+                "Stored positions invalidated by new media writes; other videos and denied leases retained");
     }
 }

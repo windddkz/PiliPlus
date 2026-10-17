@@ -316,6 +316,24 @@ void main() {
       expect((await cache.take(account, key))?.lastPlayTime, 500);
     },
   );
+  test(
+    'refills follow the latest played or sought position and completed replay',
+    () async {
+      final model = fixture();
+      cache.remember(account, key, model);
+      final token = model.officialPreloadToken!;
+      for (final position in [10000, 30000, 3000, 120000]) {
+        cache.recordPosition(account, token, position);
+        final preload = (await cache.retain(account, key))!;
+        expect(preload.lastPlayTime, position);
+        expect(preload.officialPreloadToken, token);
+        expect((await cache.take(account, key))!.lastPlayTime, position);
+      }
+      cache.recordPosition(account, token, 120000, completed: true);
+      expect((await cache.retain(account, key))!.lastPlayTime, 0);
+      expect((await cache.take(account, key))!.lastPlayTime, 0);
+    },
+  );
 
   test(
     'cold playback is retained and progress is bound to account and token',

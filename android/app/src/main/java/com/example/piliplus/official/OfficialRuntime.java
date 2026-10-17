@@ -850,7 +850,7 @@ final class OfficialRuntime {
                         ids.add(invoke(stream, "getQn"));
                     int count = videos.size() + audios.size();
                     if (ids.size() == count)
-                        cache = mediaCache.acquire(preloadKey(request, false), count,
+                        cache = acquireMediaCache(preloadKey(request, false), count,
                                 context.getCacheDir().getUsableSpace());
                 }
             } catch (IOException | SecurityException error) {
@@ -929,6 +929,14 @@ final class OfficialRuntime {
             }
             scheduleMediaCachePrune();
         }, 60000);
+    }
+    private OfficialMediaCache.Lease acquireMediaCache(String key, int tracks, long usableBytes)
+            throws IOException {
+        OfficialMediaCache.Lease lease = mediaCache.acquire(key, tracks, usableBytes);
+        // A new writer can overwrite ranges that earlier prepared-position hints referred to.
+        if (lease != null)
+            storedPreloads.values().removeIf(lease.directory.getName()::equals);
+        return lease;
     }
     private String preloadKey(Bundle request) throws Exception {
         return preloadKey(request, true);
