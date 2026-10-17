@@ -503,6 +503,34 @@ public final class OfficialPreloadCacheTest {
             c.event(f.request, f.task, "REMOVED", 0);
             check(c.size() == 29 && c.add("overflow", "extra") && c.size() == 30);
         }
-        System.out.println("27 ownership, dynamic priority and thirty-slot scenarios passed");
+        {
+            Fake f = new Fake();
+            OfficialPreloadCache<String> c = f.cache();
+            c.add("a-10s", "media-a");
+            long task = f.task;
+            c.event(0, task, "READY", 0);
+            c.add("b-0s", "media-b");
+            check(c.discardMatching("media-a" ::equals));
+            long remove = f.request;
+            check(c.discardMatching("media-a" ::equals) && f.request == remove);
+            check(c.peek("b-0s").equals("media-b"));
+            check(!f.calls.contains("release:media-a"));
+            c.event(remove + 1, task, "REMOVED", 0);
+            check(c.discardMatching("media-a" ::equals));
+            c.event(remove, task, "REMOVED", 0);
+            check(!c.discardMatching("media-a" ::equals));
+            check(f.calls.stream().filter("release:media-a" ::equals).count() == 1);
+            c.add("a-30s", "media-a");
+            task = f.task;
+            List<String> consumed = new ArrayList<>();
+            check(c.take("a-30s", consumed::add));
+            long detach = f.request;
+            check(c.discardMatching("media-a" ::equals) && f.request == detach);
+            c.event(detach, task, "DETACHED", 0);
+            check(consumed.equals(List.of("media-a")));
+            check(!c.discardMatching("media-a" ::equals));
+        }
+        System.out.println(
+                "28 ownership, dynamic priority, position replacement and thirty-slot scenarios passed");
     }
 }

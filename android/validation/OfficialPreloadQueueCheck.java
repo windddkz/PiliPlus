@@ -124,6 +124,7 @@ public final class OfficialPreloadQueueCheck {
     }
     public static void main(String[] args) throws Exception {
         storedPositionsFollowWrites();
+        changedPositionReleasesPreviousWriter();
         OfficialRuntime priorityRuntime = new OfficialRuntime(context(), null, null);
         Method priority = OfficialRuntime.class.getDeclaredMethod("preloadPriority", String.class);
         priority.setAccessible(true);
@@ -287,6 +288,67 @@ public final class OfficialPreloadQueueCheck {
         selectedWithRetention();
         System.out.println(
                 "Actual queue: bounded retention, wrong ACK, expiry, duplicates, foreground priority, permit expiry, account invalidation and media identity passed");
+    }
+    static void changedPositionReleasesPreviousWriter() throws Exception {
+        OfficialRuntime runtime = new OfficialRuntime(context(), null, null);
+        Bundle request = new Bundle();
+        request.putString("preloadToken", "position-check");
+        request.putString("source", "https://example.invalid/video");
+        request.putString("audio", "https://example.invalid/audio");
+        Method identity =
+                OfficialRuntime.class.getDeclaredMethod("preloadKey", Bundle.class, boolean.class);
+        identity.setAccessible(true);
+        String mediaKey = (String) identity.invoke(runtime, request, false);
+        Class<?> mediaType = Class.forName(OfficialRuntime.class.getName() + "$NativeMedia");
+        Constructor<?> constructor =
+                mediaType.getDeclaredConstructor(Object.class, boolean.class, boolean.class);
+        constructor.setAccessible(true);
+        Field mediaIdentity = mediaType.getDeclaredField("mediaKey");
+        mediaIdentity.setAccessible(true);
+        Object media = constructor.newInstance(null, false, true);
+        mediaIdentity.set(media, mediaKey);
+        List<String> calls = new ArrayList<>();
+        long[] removal = new long[2];
+        OfficialPreloadCache<Object> cache =
+                new OfficialPreloadCache<>(new OfficialPreloadCache.Backend<Object>() {
+                    public void add(long r, long t, Object i) {}
+                    public void detach(long r, long t, Object i) {
+                        throw new AssertionError();
+                    }
+                    public void interrupt(Object i) {
+                        calls.add("interrupt");
+                    }
+                    public void remove(long r, long t, Object i) {
+                        removal[0] = r;
+                        removal[1] = t;
+                        calls.add("remove");
+                    }
+                    public void release(Object i) {
+                        calls.add("release");
+                    }
+                    public void failed(Exception e) {
+                        throw new AssertionError(e);
+                    }
+                }, (delay, action) -> {}, SystemClock::elapsedRealtime);
+        field("preloads").set(runtime, cache);
+        check(cache.add("position-10000", media));
+        Method retire =
+                OfficialRuntime.class.getDeclaredMethod("retireOtherPosition", Bundle.class);
+        retire.setAccessible(true);
+        request.putLong("position", 30000);
+        check(Boolean.TRUE.equals(retire.invoke(runtime, request)));
+        check(calls.equals(List.of("interrupt", "remove")));
+        check(Boolean.TRUE.equals(retire.invoke(runtime, request)) && calls.size() == 2);
+        Bundle unrelated = new Bundle(request);
+        unrelated.putString("preloadToken", "another-video");
+        check(Boolean.FALSE.equals(retire.invoke(runtime, unrelated)));
+        cache.event(removal[0] + 1, removal[1], "REMOVED", 0);
+        check(Boolean.TRUE.equals(retire.invoke(runtime, request)));
+        cache.event(removal[0], removal[1], "REMOVED", 0);
+        check(Boolean.FALSE.equals(retire.invoke(runtime, request)));
+        check(calls.equals(List.of("interrupt", "remove", "release")));
+        System.out.println(
+                "New resume point waits for previous media writer ACK; other media retained");
     }
     static void storedPositionsFollowWrites() throws Exception {
         java.nio.file.Path root = java.nio.file.Files.createTempDirectory(

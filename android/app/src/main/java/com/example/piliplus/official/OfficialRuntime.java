@@ -1154,6 +1154,11 @@ final class OfficialRuntime {
         preloadPermitUntil = SystemClock.elapsedRealtime() + 15000;
         preloadTrace("SUBMIT key=" + key + " token=" + data.getString("preloadToken")
                 + " position=" + data.getLong("position", 0));
+        for (Iterator<Map.Entry<String, Bundle>> entries = pendingPreloads.entrySet().iterator();
+                entries.hasNext();) {
+            if (mediaKey.equals(preloadKey(entries.next().getValue(), false)))
+                entries.remove();
+        }
         if (preloads.retain(key)) {
             preloadTrace("RETAIN key=" + key + " ready=" + preloads.ready(key));
             return preloads.ready(key) ? "ready" : "queued";
@@ -1170,7 +1175,6 @@ final class OfficialRuntime {
             return "queued";
         Bundle request = new Bundle(data);
         request.putLong("preloadQueuedAt", SystemClock.elapsedRealtime());
-        pendingPreloads.remove(key);
         if (pendingPreloads.size() >= 128)
             pendingPreloads.remove(pendingPreloads.keySet().iterator().next());
         pendingPreloads.put(key, request);
@@ -1263,6 +1267,16 @@ final class OfficialRuntime {
                 pendingPreloads.remove(key);
                 continue;
             }
+            String mediaKey = preloadKey(request, false);
+            OfficialMediaCache.Lease playingCache = itemCaches.get(item);
+            if (playingCache != null && playingCache.directory.getName().equals(mediaKey)) {
+                pendingPreloads.remove(key);
+                continue;
+            }
+            // Different resume points share one disk writer; replace the old task after its ACK.
+            if (mediaKey != null
+                    && preloads.discardMatching(media -> mediaKey.equals(media.mediaKey)))
+                return;
             if (preloads.preparing() + preloadProbes.size()
                     >= (player == null ? PRELOAD_PARALLELISM : 1))
                 return;
@@ -1517,8 +1531,7 @@ final class OfficialRuntime {
                     awaitingPreload = 0;
                     awaitingPreloader = null;
                 }
-                useItem(nativeItem(media.asset, request.getLong("position", 0), request), token,
-                        request);
+                useNewItem(media, token, request, SystemClock.elapsedRealtime() + 20000);
             } catch (Exception | LinkageError error) {
                 try {
                     release();
@@ -1534,6 +1547,25 @@ final class OfficialRuntime {
             }
         }
     }
+    private boolean retireOtherPosition(Bundle request) throws Exception {
+        String mediaKey = preloadKey(request, false);
+        return mediaKey != null && preloads != null
+                && preloads.discardMatching(media -> mediaKey.equals(media.mediaKey));
+    }
+    private void useNewItem(NativeMedia media, long token, Bundle request, long deadline)
+            throws Exception {
+        if (token != generation || player == null)
+            return;
+        if (SystemClock.elapsedRealtime() >= deadline)
+            throw new IOException("Media cache ownership timeout");
+        if (retireOtherPosition(request)) {
+            worker.postDelayed(
+                    () -> run(token, () -> useNewItem(media, token, request, deadline)), 20);
+            return;
+        }
+        useItem(nativeItem(media.asset, request.getLong("position", 0), request), token, request);
+    }
+
     private void consumePreload(NativeMedia media, long token, Bundle request) {
         media.preloadComplete = false;
         storedPreloads.remove(media.preloadKey);
@@ -1595,7 +1627,7 @@ final class OfficialRuntime {
             throw new IOException("Native metadata preparation timeout");
         if (!cached) {
             // A cancelled foreground item still owns its one slot until the exact native acknowledgement.
-            if (queue.size() >= 1) {
+            if (queue.size() >= 1 || (media.item == null && retireOtherPosition(request))) {
                 worker.postDelayed(()
                                            -> run(token,
                                                    ()

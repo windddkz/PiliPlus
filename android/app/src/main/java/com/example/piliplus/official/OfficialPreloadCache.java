@@ -4,6 +4,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
 
 /** Worker-thread ownership of original native preload tasks, including pending removals. */
@@ -145,6 +146,19 @@ final class OfficialPreloadCache<T> {
         }
         return false;
     }
+    boolean discardMatching(Predicate<T> matches) {
+        boolean owned = false;
+        for (Entry entry : entries.values()) {
+            if (!matches.test(entry.item))
+                continue;
+            owned = true;
+            if (entry.consumer == null
+                    && (entry.state == State.ADDING || entry.state == State.READY))
+                remove(entry);
+        }
+        return owned;
+    }
+
     void discard(String key) {
         if (key == null)
             return;
