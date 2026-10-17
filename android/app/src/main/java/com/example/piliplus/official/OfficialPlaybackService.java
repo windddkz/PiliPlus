@@ -111,7 +111,8 @@ public final class OfficialPlaybackService extends Service {
                     preloadState = runtime.preload(data);
                     break;
                 case "preloadControl":
-                    runtime.enablePreloads(data.getBoolean("enabled"));
+                    runtime.enablePreloads(data.getBoolean("enabled"),
+                            data.getStringArrayList("candidates"), data.getInt("priorityCount", 6));
                     break;
                 case "open":
                     runtime.open(data, data.getBoolean("awaitOutput") ? null : surface);

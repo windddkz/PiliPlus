@@ -7,11 +7,12 @@ class PreloadQueue {
   PreloadQueue({required this.load, required this.enable, this.window = 64})
     : assert(window > 0);
   final Future<String> Function(PreloadCandidate) load;
-  final Future<void> Function(bool) enable;
+  final Future<void> Function(bool, List<PreloadCandidate>, int) enable;
   final int window;
   Object? _owner;
   List<PreloadCandidate> _pending = [];
   int _revision = 0;
+  int _priorityCount = 6;
   bool _running = false;
   bool _enabled = false;
   bool _controlDirty = true;
@@ -19,7 +20,13 @@ class PreloadQueue {
   int get candidateCount => _candidates.length;
   final Set<PreloadCandidate> _visited = {};
 
-  void update(Object owner, Iterable<PreloadCandidate> candidates) {
+  void update(
+    Object owner,
+    Iterable<PreloadCandidate> candidates, {
+    int priorityCount = 6,
+  }) {
+    assert(priorityCount >= 0);
+    _priorityCount = priorityCount;
     final ordered = _candidates = candidates.toSet().toList();
     if (!identical(_owner, owner)) _visited.clear();
     _owner = owner;
@@ -32,9 +39,13 @@ class PreloadQueue {
     _run();
   }
 
-  void refill(Object owner, Iterable<PreloadCandidate> candidates) {
+  void refill(
+    Object owner,
+    Iterable<PreloadCandidate> candidates, {
+    int priorityCount = 6,
+  }) {
     _visited.clear();
-    update(owner, candidates);
+    update(owner, candidates, priorityCount: priorityCount);
   }
 
   void pause(Object owner) {
@@ -65,7 +76,12 @@ class PreloadQueue {
         final wanted = _owner != null;
         if (_controlDirty || _enabled != wanted) {
           _controlDirty = false;
-          await enable(wanted);
+          final candidates = _candidates.take(window).toList();
+          await enable(
+            wanted,
+            candidates,
+            _priorityCount.clamp(0, candidates.length),
+          );
           _enabled = wanted;
           if (revision != _revision) continue;
         }

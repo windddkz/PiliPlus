@@ -199,6 +199,7 @@ class OfficialPlayer extends PlatformPlayer {
 
   static Future<String> preloadWhenIdle(
     NetworkSource source, {
+    required String candidate,
     required Duration position,
     required String userAgent,
     required String referer,
@@ -214,12 +215,13 @@ class OfficialPlayer extends PlatformPlayer {
         .where((p) => p._disposing == null && !p._dead && !p._disposed)
         .firstOrNull;
     if (active != null) {
-      return active._preload(source, position, userAgent, referer);
+      return active._preload(source, position, userAgent, referer, candidate);
     }
     var state = 'deferred';
     final pending = _idleWarmup =
         _warmUpAndRelease(
           preload: source,
+          candidate: candidate,
           position: position,
           userAgent: userAgent,
           referer: referer,
@@ -239,10 +241,12 @@ class OfficialPlayer extends PlatformPlayer {
     Duration position,
     String userAgent,
     String referer,
+    String? candidate,
   ) async {
     if (_disposed || _disposing != null || _dead) return 'deferred';
     return await _channel.invokeMethod<String>('preload', {
           'session': session,
+          'preloadCandidate': candidate,
           ..._sourceArguments(source, false),
           'position': position.inMilliseconds,
           'userAgent': userAgent,
@@ -251,7 +255,11 @@ class OfficialPlayer extends PlatformPlayer {
         'deferred';
   }
 
-  static Future<void> enablePreloads(bool enabled) async {
+  static Future<void> enablePreloads(
+    bool enabled, {
+    List<String> candidates = const [],
+    int priorityCount = 6,
+  }) async {
     while (_idleWarmup != null) {
       try {
         await _idleWarmup;
@@ -262,11 +270,18 @@ class OfficialPlayer extends PlatformPlayer {
         .where((p) => p._disposing == null && !p._dead && !p._disposed)
         .firstOrNull;
     if (active != null) {
-      await active._send('preloadControl', {'enabled': enabled});
+      await active._send('preloadControl', {
+        'enabled': enabled,
+        'candidates': candidates,
+        'priorityCount': priorityCount,
+      });
       return;
     }
-    final pending = _idleWarmup = _warmUpAndRelease(enablePreloads: enabled)
-        .then((_) {});
+    final pending = _idleWarmup = _warmUpAndRelease(
+      enablePreloads: enabled,
+      candidates: candidates,
+      priorityCount: priorityCount,
+    ).then((_) {});
     try {
       await pending;
     } finally {
@@ -276,6 +291,9 @@ class OfficialPlayer extends PlatformPlayer {
 
   static Future<String> _warmUpAndRelease({
     NetworkSource? preload,
+    String? candidate,
+    List<String> candidates = const [],
+    int priorityCount = 6,
     Duration position = Duration.zero,
     String userAgent = '',
     String referer = '',
@@ -286,11 +304,21 @@ class OfficialPlayer extends PlatformPlayer {
       player = await _create((reason) => Future.error(StateError(reason)));
       await player.warmUp();
       if (enablePreloads != null) {
-        await player._send('preloadControl', {'enabled': enablePreloads});
+        await player._send('preloadControl', {
+          'enabled': enablePreloads,
+          'candidates': candidates,
+          'priorityCount': priorityCount,
+        });
       }
       return preload == null
           ? 'idle'
-          : await player._preload(preload, position, userAgent, referer);
+          : await player._preload(
+              preload,
+              position,
+              userAgent,
+              referer,
+              candidate,
+            );
     } finally {
       await player?.dispose();
     }

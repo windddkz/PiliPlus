@@ -8,6 +8,62 @@ Future<void> settle() => Future<void>.delayed(Duration.zero);
 
 void main() {
   test(
+    'large visible windows keep all visible candidates in the priority tier',
+    () async {
+      final counts = <int>[];
+      final queue = PreloadQueue(
+        window: 12,
+        enable: (_, items, count) async {
+          counts.add(count);
+        },
+        load: (_) async => 'ready',
+      );
+      final owner = Object();
+      queue.refill(owner, List.generate(20, candidate), priorityCount: 10);
+      await settle();
+      queue.refill(owner, List.generate(2, candidate));
+      await settle();
+      queue.pause(owner);
+      await settle();
+      expect(counts, [10, 2, 0]);
+    },
+  );
+  test(
+    'page priority order reaches native before any candidates load',
+    () async {
+      final calls = <String>[];
+      final queue = PreloadQueue(
+        window: 3,
+        enable: (on, items, priorityCount) async =>
+            calls.add('control:$on:${items.map((i) => i.cid).join(',')}'),
+        load: (item) async {
+          calls.add('load:${item.cid}');
+          return 'ready';
+        },
+      );
+      final home = Object(), detail = Object();
+      queue.refill(home, [
+        candidate(1),
+        candidate(2),
+        candidate(3),
+        candidate(4),
+      ]);
+      await settle();
+      expect(calls.first, 'control:true:1,2,3');
+      calls.clear();
+      queue.refill(detail, [candidate(4), candidate(2), candidate(1)]);
+      await settle();
+      expect(calls, ['control:true:4,2,1', 'load:4', 'load:2', 'load:1']);
+      calls.clear();
+      queue.refill(home, [candidate(2), candidate(1)]);
+      await settle();
+      expect(calls.first, 'control:true:2,1');
+      queue.pause(home);
+      await settle();
+      expect(calls.last, 'control:false:');
+    },
+  );
+  test(
     'all candidates enter the queue; IO window is deduplicated and prioritized',
     () async {
       final loaded = <PreloadCandidate>[];
@@ -17,7 +73,7 @@ void main() {
           loaded.add(item);
           return 'queued';
         },
-        enable: (on) async {
+        enable: (on, candidates, priorityCount) async {
           controls.add(on);
         },
         window: 4,
@@ -52,7 +108,7 @@ void main() {
         loaded.add(item);
         return loaded.length == 1 ? ready.future : Future.value('ready');
       },
-      enable: (on) async {
+      enable: (on, candidates, priorityCount) async {
         controls.add(on);
       },
     );
@@ -79,7 +135,7 @@ void main() {
         loads++;
         return 'stored';
       },
-      enable: (_) async {
+      enable: (_, candidates, priorityCount) async {
         if (++calls == 1) throw StateError('offline');
       },
     );

@@ -62,7 +62,14 @@ abstract final class VideoHttp {
   );
   static final preloadQueue = PreloadQueue(
     load: (item) => prefetchVideoUrl(item.bvid, item.cid),
-    enable: OfficialPlayer.enablePreloads,
+    enable: (enabled, candidates, priorityCount) =>
+        OfficialPlayer.enablePreloads(
+          enabled,
+          candidates: [
+            for (final item in candidates) '${item.bvid}:${item.cid}',
+          ],
+          priorityCount: priorityCount,
+        ),
   );
 
   static bool get prefetchEnabled =>
@@ -93,7 +100,12 @@ abstract final class VideoHttp {
     final retained = await _prefetch.retain(account, key);
     if (!identical(account, Accounts.video)) return 'retry';
     if (retained != null) {
-      return _preloadMedia(retained, account);
+      if (const bool.fromEnvironment('PILI_PRELOAD_TRACE')) {
+        debugPrint(
+          'PiliSnapshot bvid=$bvid cid=$cid token=${retained.officialPreloadToken} retained=true',
+        );
+      }
+      return _preloadMedia(retained, account, '$bvid:$cid');
     }
     await _prefetch.preload(account, key, () async {
       final cancel = CancelToken();
@@ -121,12 +133,20 @@ abstract final class VideoHttp {
       }
     });
     final cached = await _prefetch.retain(account, key);
-    return cached == null ? 'retry' : _preloadMedia(cached, account);
+    if (const bool.fromEnvironment('PILI_PRELOAD_TRACE')) {
+      debugPrint(
+        'PiliSnapshot bvid=$bvid cid=$cid token=${cached?.officialPreloadToken} retained=false',
+      );
+    }
+    return cached == null
+        ? 'retry'
+        : _preloadMedia(cached, account, '$bvid:$cid');
   }
 
   static Future<String> _preloadMedia(
     PlayUrlModel response,
     Account account,
+    String candidate,
   ) async {
     try {
       if (!prefetchEnabled || !identical(account, Accounts.video)) {
@@ -184,6 +204,7 @@ abstract final class VideoHttp {
       }
       return await OfficialPlayer.preloadWhenIdle(
         source,
+        candidate: candidate,
         position: Duration(milliseconds: response.lastPlayTime),
         userAgent: BrowserUa.pc,
         referer: HttpString.baseUrl,

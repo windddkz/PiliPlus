@@ -358,9 +358,26 @@ public final class OfficialPlayerPlugin
         Bundle data = new Bundle();
         switch (call.method) {
             case "preloadControl":
+                Object candidates = call.argument("candidates");
+                if (!(candidates instanceof java.util.List<?>)
+                        || ((java.util.List<?>) candidates).size() > 64)
+                    throw new IllegalArgumentException("Invalid preload candidates");
+                java.util.ArrayList<String> ordered = new java.util.ArrayList<>();
+                for (Object candidate : (java.util.List<?>) candidates) {
+                    if (!(candidate instanceof String)
+                            || !((String) candidate).matches("BV[0-9A-Za-z]{10}:[1-9][0-9]{0,18}"))
+                        throw new IllegalArgumentException("Invalid preload candidate");
+                    ordered.add((String) candidate);
+                }
+                int priorityCount = number(call, "priorityCount", 6).intValue();
+                if (priorityCount < 0 || priorityCount > 64)
+                    throw new IllegalArgumentException("Invalid preload priority count");
+                data.putInt("priorityCount", priorityCount);
+                data.putStringArrayList("candidates", ordered);
                 data.putBoolean("enabled", Boolean.TRUE.equals(call.argument("enabled")));
                 break;
             case "preload":
+                data.putString("preloadCandidate", call.argument("preloadCandidate"));
                 if (closing) {
                     result.error("closing", "Player session is closing", null);
                     return;

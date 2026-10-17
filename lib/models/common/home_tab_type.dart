@@ -38,8 +38,8 @@ enum HomeTabType implements EnumWithLabel {
   Widget get page => switch (this) {
     HomeTabType.live => const LivePage(),
     HomeTabType.rcmd => const RcmdPage(),
-    HomeTabType.hot => const HotPage(),
-    HomeTabType.rank => const RankPage(),
+    HomeTabType.hot => const HotPage(inHome: true),
+    HomeTabType.rank => const RankPage(inHome: true),
     HomeTabType.bangumi => const PgcPage(tabType: HomeTabType.bangumi),
     HomeTabType.cinema => const PgcPage(tabType: HomeTabType.cinema),
   };

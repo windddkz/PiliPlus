@@ -6,7 +6,8 @@ import 'package:get/get.dart';
 import 'package:material_ui/material_ui.dart';
 
 class RankPage extends StatefulWidget {
-  const RankPage({super.key});
+  const RankPage({super.key, this.inHome = false});
+  final bool inHome;
 
   @override
   State<RankPage> createState() => _RankPageState();
@@ -33,6 +34,7 @@ class _RankPageState extends State<RankPage>
             children: RankType.values
                 .map(
                   (item) => ZonePage(
+                    inHome: widget.inHome,
                     rid: item.rid,
                     seasonType: item.seasonType,
                   ),

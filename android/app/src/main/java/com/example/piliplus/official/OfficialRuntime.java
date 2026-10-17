@@ -37,23 +37,26 @@ final class OfficialRuntime {
     private OfficialMediaCache mediaCache;
     private boolean mediaCacheAttempted;
     private final Map<Object, OfficialMediaCache.Lease> itemCaches = new IdentityHashMap<>();
-    private final ThreadPoolExecutor preloadProbeWorker =
-            new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(PRELOAD_PARALLELISM),
-                    r -> new Thread(r, "official-preload-probe"));
+    private final ThreadPoolExecutor preloadProbeWorker = new ThreadPoolExecutor(1, 1, 0L,
+            TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(PRELOAD_PARALLELISM),
+            r -> new Thread(r, "official-preload-probe"));
     private final Map<String, PreloadProbe> preloadProbes = new HashMap<>();
     private final Map<String, Bundle> pendingPreloads = new LinkedHashMap<>();
     private long preloadEpoch, awaitingPreload;
     private boolean preloadsEnabled = true, preloadsPaused, playbackBuffering;
     private long playbackBuffered;
+    private int preloadPriorityCount = 6;
     private long preloadPermitUntil;
     private String preloadScope;
     private final Map<String, String> storedPreloads = new LinkedHashMap<>();
+    private final Map<String, Integer> preloadPriorities = new HashMap<>();
+    private final Map<String, String> mediaCandidates = new LinkedHashMap<>();
     private static final class NativeMedia {
         final Object asset;
         final boolean hdr, nativeMetadata;
         Object item;
         long preloadTarget = 2000;
-        String preloadKey, mediaKey;
+        String preloadKey, mediaKey, candidate;
         boolean preloadComplete;
         NativeMedia(Object asset, boolean hdr, boolean nativeMetadata) {
             this.asset = asset;
@@ -833,7 +836,8 @@ final class OfficialRuntime {
                 if (!mediaCacheAttempted) {
                     mediaCacheAttempted = true;
                     mediaCache = new OfficialMediaCache(
-                            new File(context.getCacheDir(), "official-media").getCanonicalFile());
+                            new File(context.getCacheDir(), "official-media").getCanonicalFile(),
+                            key -> preloadPriority(mediaCandidates.get(key)));
                     scheduleMediaCachePrune();
                 }
                 if (mediaCache != null) {
@@ -1022,6 +1026,9 @@ final class OfficialRuntime {
         OfficialPreloadCache<NativeMedia> cache = new OfficialPreloadCache<>(
                 new OfficialPreloadCache.Backend<NativeMedia>() {
                     public void add(long request, long task, NativeMedia media) throws Exception {
+                        preloadTrace("ADD key=" + media.preloadKey + " media=" + media.mediaKey
+                                + " task=" + task
+                                + " foreground=" + (owner == foregroundPreloader));
                         preloadResult(owner, add, request, task, media.item, (byte) 50,
                                 media.preloadTarget);
                     }
@@ -1038,12 +1045,15 @@ final class OfficialRuntime {
                     }
                     public void remove(long request, long task, NativeMedia media)
                             throws Exception {
+                        preloadTrace("REMOVE key=" + media.preloadKey + " task=" + task);
                         preloadResult(owner, "removeTask", request, task, media.item);
                     }
                     public void release(NativeMedia media) throws Exception {
                         releaseItem(media.item);
                         if (media.preloadComplete && mediaCache != null
                                 && mediaCache.contains(media.mediaKey)) {
+                            preloadTrace(
+                                    "STORED key=" + media.preloadKey + " media=" + media.mediaKey);
                             storedPreloads.put(media.preloadKey, media.mediaKey);
                             while (storedPreloads.size() > 128)
                                 storedPreloads.remove(storedPreloads.keySet().iterator().next());
@@ -1056,7 +1066,8 @@ final class OfficialRuntime {
                 (delay, action)
                         -> worker.postDelayed(action, delay),
                 SystemClock::elapsedRealtime, capacity,
-                capacity == 1 ? 30000 : OfficialMediaCache.TTL_MILLIS);
+                capacity == 1 ? 30000 : OfficialMediaCache.TTL_MILLIS,
+                media -> preloadPriority(media.candidate));
         Object cb = Proxy.newProxyInstance(loader,
                 new Class<?>[] {cls("kotlin.jvm.functions.Function1")}, (proxy, method, args) -> {
                     switch (method.getName()) {
@@ -1081,7 +1092,8 @@ final class OfficialRuntime {
                                     if (owner == preloader)
                                         drainPreloads();
                                     if (com.example.piliplus.BuildConfig.DEBUG
-                                            || android.util.Log.isLoggable("PiliPreload", android.util.Log.DEBUG))
+                                            || android.util.Log.isLoggable(
+                                                    "PiliPreload", android.util.Log.DEBUG))
                                         android.util.Log.d("PiliPreload",
                                                 type + " foreground="
                                                         + (owner == foregroundPreloader)
@@ -1100,6 +1112,11 @@ final class OfficialRuntime {
         invoke(owner, "setEventCallback", cb);
         return cache;
     }
+    private static void preloadTrace(String message) {
+        if (com.example.piliplus.BuildConfig.DEBUG
+                || android.util.Log.isLoggable("PiliPreload", android.util.Log.DEBUG))
+            android.util.Log.d("PiliPreload", message);
+    }
     String preload(Bundle data) throws Exception {
         initialize();
         syncPreloadScope(data);
@@ -1116,14 +1133,28 @@ final class OfficialRuntime {
         for (String header : new String[] {ua, referer})
             if (header.length() > 4096 || header.contains("\r") || header.contains("\n"))
                 throw new IllegalArgumentException("Invalid source header");
+        String candidate = data.getString("preloadCandidate");
+        if (candidate != null && !candidate.matches("BV[0-9A-Za-z]{10}:[1-9][0-9]{0,18}"))
+            throw new IllegalArgumentException("Invalid preload candidate");
+        String mediaKey = preloadKey(data, false);
+        mediaCandidates.remove(mediaKey);
+        mediaCandidates.put(mediaKey, candidate);
+        while (mediaCandidates.size() > 256)
+            mediaCandidates.remove(mediaCandidates.keySet().iterator().next());
         ensurePreloader();
         preloadsEnabled = true;
         preloadPermitUntil = SystemClock.elapsedRealtime() + 15000;
-        if (preloads.retain(key))
+        preloadTrace("SUBMIT key=" + key + " token=" + data.getString("preloadToken")
+                + " position=" + data.getLong("position", 0));
+        if (preloads.retain(key)) {
+            preloadTrace("RETAIN key=" + key + " ready=" + preloads.ready(key));
             return preloads.ready(key) ? "ready" : "queued";
+        }
         String disk = storedPreloads.get(key);
-        if (disk != null && mediaCache != null && mediaCache.contains(disk))
+        if (disk != null && mediaCache != null && mediaCache.contains(disk)) {
+            preloadTrace("DISK key=" + key + " media=" + disk);
             return "stored";
+        }
         storedPreloads.remove(key);
         if (preloads.isBroken())
             return "unavailable";
@@ -1138,7 +1169,28 @@ final class OfficialRuntime {
         drainPreloads();
         return "queued";
     }
+    private int preloadPriority(String candidate) {
+        int rank = preloadPriorities.getOrDefault(candidate, Integer.MAX_VALUE);
+        return rank < preloadPriorityCount ? rank : rank == Integer.MAX_VALUE ? rank : 100 + rank;
+    }
     void enablePreloads(boolean enabled) throws Exception {
+        enablePreloads(enabled, Collections.emptyList(), 6);
+    }
+    void enablePreloads(boolean enabled, List<String> candidates, int priorityCount)
+            throws Exception {
+        if (candidates == null || candidates.size() > 64 || priorityCount < 0 || priorityCount > 64)
+            throw new IllegalArgumentException("Invalid preload window");
+        Map<String, Integer> ordered = new HashMap<>();
+        for (String candidate : candidates) {
+            if (candidate == null || !candidate.matches("BV[0-9A-Za-z]{10}:[1-9][0-9]{0,18}"))
+                throw new IllegalArgumentException("Invalid preload candidate");
+            ordered.putIfAbsent(candidate, ordered.size());
+        }
+        preloadPriorities.clear();
+        preloadPriorities.putAll(ordered);
+        preloadPriorityCount = Math.min(priorityCount, ordered.size());
+        preloadTrace("PRIORITY count=" + preloadPriorityCount + " candidates=" + candidates);
+        preloadTrace("CONTROL enabled=" + enabled + " waiting=" + pendingPreloads.size());
         preloadsEnabled = enabled;
         preloadPermitUntil = enabled ? SystemClock.elapsedRealtime() + 15000 : 0;
         // A page update supplies a newly ordered window; retain native data, replace waiting work.
@@ -1164,6 +1216,7 @@ final class OfficialRuntime {
         if (preloadScope != null) {
             trimPreloads();
             storedPreloads.clear();
+            mediaCandidates.clear();
             if (mediaCache != null)
                 mediaCache.clear();
         }
@@ -1184,6 +1237,9 @@ final class OfficialRuntime {
             return;
         boolean allowed = mayPreload();
         if (preloadsPaused == allowed) {
+            preloadTrace("GATE allowed=" + allowed + " player=" + (player != null)
+                    + " prepared=" + prepared + " buffering=" + playbackBuffering
+                    + " buffered=" + playbackBuffered + " pending=" + pendingPreloads.size());
             preloadResult(preloader, allowed ? "resumeAllTask" : "pauseAllTask");
             preloadsPaused = !allowed;
         }
@@ -1194,10 +1250,13 @@ final class OfficialRuntime {
             Bundle request = pendingPreloads.get(key);
             if (SystemClock.elapsedRealtime() - request.getLong("preloadQueuedAt") >= 30000
                     || preloads.retain(key)) {
+                preloadTrace("DEQUEUE key=" + key + " age="
+                        + (SystemClock.elapsedRealtime() - request.getLong("preloadQueuedAt")));
                 pendingPreloads.remove(key);
                 continue;
             }
-            if (preloads.preparing() + preloadProbes.size() >= PRELOAD_PARALLELISM)
+            if (preloads.preparing() + preloadProbes.size()
+                    >= (player == null ? PRELOAD_PARALLELISM : 1))
                 return;
             if (preloads.size() + preloadProbes.size() >= OfficialPreloadCache.MAX_ENTRIES) {
                 preloads.makeRoom();
@@ -1209,6 +1268,7 @@ final class OfficialRuntime {
     }
     private void identifyPreload(NativeMedia media, String key, Bundle request) throws Exception {
         media.preloadKey = key;
+        media.candidate = request.getString("preloadCandidate");
         media.mediaKey = preloadKey(request, false);
     }
     private void startPreload(String key, Bundle request) throws Exception {
@@ -1417,6 +1477,9 @@ final class OfficialRuntime {
                 speed(speed);
                 drainPreloads();
                 NativeMedia cached = preloads == null ? null : preloads.peek(cacheKey);
+                preloadTrace("OPEN key=" + cacheKey + " media=" + preloadKey(request, false)
+                        + " token=" + request.getString("preloadToken") + " position=" + position
+                        + " retained=" + (cached != null) + " probe=" + (pendingProbe != null));
                 DashSource[] tracks = null;
                 if (cached == null && pendingProbe != null) {
                     stage("dash_probe");

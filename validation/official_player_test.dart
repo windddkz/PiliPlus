@@ -70,6 +70,7 @@ void main() {
   );
   Future<void> preload() => OfficialPlayer.preloadWhenIdle(
     preloadedSource(),
+    candidate: 'BV1Sc411U7m6:1',
     position: const Duration(milliseconds: 12375),
     userAgent: 'test-agent',
     referer: 'https://example.invalid/',
@@ -872,6 +873,33 @@ void main() {
     final player = await create();
     await preload();
     expect(calls.map((c) => c.method), ['availability', 'create', 'preload']);
+    await player.dispose();
+  });
+  test('page priority reaches both idle and playing native sessions', () async {
+    const candidates = ['BV1Sc411U7m6:1', 'BV1Sc411U7m6:2'];
+    await OfficialPlayer.enablePreloads(
+      true,
+      candidates: candidates,
+      priorityCount: 2,
+    );
+    final idle = calls.singleWhere((c) => c.method == 'preloadControl');
+    expect((idle.arguments as Map)['candidates'], candidates);
+    expect((idle.arguments as Map)['priorityCount'], 2);
+    expect(calls.last.method, 'dispose');
+    calls.clear();
+    final player = await create();
+    await OfficialPlayer.enablePreloads(
+      true,
+      candidates: candidates.reversed.toList(),
+      priorityCount: 1,
+    );
+    final active = calls.singleWhere((c) => c.method == 'preloadControl');
+    expect(
+      (active.arguments as Map)['candidates'],
+      candidates.reversed.toList(),
+    );
+    expect((active.arguments as Map)['priorityCount'], 1);
+    expect(calls.where((c) => c.method == 'create').length, 1);
     await player.dispose();
   });
   test(

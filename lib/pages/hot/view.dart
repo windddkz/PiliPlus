@@ -1,3 +1,6 @@
+import 'package:PiliPlus/common/widgets/video_preload_scope.dart';
+import 'package:PiliPlus/utils/id_utils.dart';
+import 'package:PiliPlus/pages/main/controller.dart';
 import 'package:PiliPlus/common/widgets/flutter/refresh_indicator.dart';
 import 'package:PiliPlus/common/widgets/image/network_img_layer.dart';
 import 'package:PiliPlus/common/widgets/loading_widget/http_error.dart';
@@ -16,7 +19,8 @@ import 'package:get/get.dart';
 import 'package:material_ui/material_ui.dart';
 
 class HotPage extends StatefulWidget {
-  const HotPage({super.key});
+  const HotPage({super.key, this.inHome = false});
+  final bool inHome;
 
   @override
   State<HotPage> createState() => _HotPageState();
@@ -124,20 +128,51 @@ class _HotPageState extends State<HotPage>
       Loading() => gridSkeleton,
       Success(:final response) =>
         response != null && response.isNotEmpty
-            ? SliverGrid.builder(
-                gridDelegate: gridDelegate,
-                itemBuilder: (context, index) {
-                  if (index == response.length - 1) {
-                    controller.onLoadMore();
+            ? VideoPreloadScope(
+                isActive: () {
+                  if (!widget.inHome) return true;
+                  final home = Get.find<HomeController>();
+                  final main = Get.find<MainController>();
+                  if (main.navigationBars[main.selectedIndex.value] != .home ||
+                      home.tabs[home.tabController.index] != HomeTabType.hot) {
+                    return false;
                   }
-                  return VideoCardH(
-                    videoItem: response[index],
-                    onRemove: () => controller.loadingState
-                      ..value.data!.removeAt(index)
-                      ..refresh(),
-                  );
+                  return true;
                 },
-                itemCount: response.length,
+                activity: widget.inHome
+                    ? Listenable.merge([
+                        Get.find<HomeController>().tabController,
+                        Get.find<MainController>().controller as Listenable,
+                      ])
+                    : null,
+                candidates: [
+                  for (final item in response)
+                    if (item.cid != null &&
+                        item.cid! > 0 &&
+                        (item.bvid != null || item.aid != null))
+                      (
+                        bvid: item.bvid ?? IdUtils.av2bv(item.aid!),
+                        cid: item.cid!,
+                      )
+                    else
+                      null,
+                ],
+                gridDelegate: gridDelegate,
+                child: SliverGrid.builder(
+                  gridDelegate: gridDelegate,
+                  itemBuilder: (context, index) {
+                    if (index == response.length - 1) {
+                      controller.onLoadMore();
+                    }
+                    return VideoCardH(
+                      videoItem: response[index],
+                      onRemove: () => controller.loadingState
+                        ..value.data!.removeAt(index)
+                        ..refresh(),
+                    );
+                  },
+                  itemCount: response.length,
+                ),
               )
             : HttpError(onReload: controller.onReload),
       Error(:final errMsg) => HttpError(
