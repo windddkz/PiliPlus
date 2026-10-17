@@ -46,6 +46,15 @@ public final class OfficialRuntimeImageCheck {
             words.putInt(0x1b5288,0xb94012b4);words.putInt(0x1b528c,0x34000314);
             words.putInt(0x1b52f8,0xb9402ab3);words.putInt(0x1b52fc,0xf94012a0);
             words.putInt(0x1b530c,0xd503201f);
+            words.putInt(0x1b8f84,0xd0001370);
+            words.putInt(0x1b8f88,0xf9419e10);
+            words.putInt(0x1b8f8c,0xd61f0200);
+            words.putInt(0x1b8f90,0xd503201f);
+            words.putInt(0x1b91f4,0xb0001370);
+            words.putInt(0x1b91f8,0xf9419e10);
+            words.putInt(0x1b91fc,0xd61f0200);
+            words.putInt(0x1b9200,0xd503201f);
+
             assert Arrays.equals(Files.readAllBytes(source),original):"Original demux changed";
             assert Arrays.equals(Files.readAllBytes(image),expected):"Unexpected derived demux instructions";
             String mapped="1000-2000 r-xp 00000000 00:00 1 "+image+"\n";
@@ -62,7 +71,7 @@ public final class OfficialRuntimeImageCheck {
             Files.write(source,new byte[]{1,2,3});
             try{OfficialRuntime.demuxImage(directory.toFile());throw new AssertionError("Accepted unlocked demux original");}
             catch(SecurityException expectedFailure){}
-            System.out.println("Exact five-word demux image / unchanged original / read-only cache / corruption rejection passed");
+            System.out.println("Exact thirteen-word demux image / unchanged original / read-only cache / corruption rejection passed");
         } finally {
             try(var paths=Files.walk(directory)){for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toList())Files.delete(path);}
         }

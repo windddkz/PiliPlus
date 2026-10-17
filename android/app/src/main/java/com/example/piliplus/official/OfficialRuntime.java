@@ -145,7 +145,16 @@ final class OfficialRuntime {
         // Snapshot count and EOF under the queue lock; the producer may append its final batch when unlocked.
         int[][] changes={{0x1b5288,0x7100029f,0xb94012b4},{0x1b528c,0x5400030d,0x34000314},
             {0x1b52f8,0xf9415ac8,0xb9402ab3},{0x1b52fc,0xf9401100,0xf94012a0},
-            {0x1b530c,0xb9402913,0xd503201f}};
+            {0x1b530c,0xb9402913,0xd503201f},
+            // Relocate private pending/dispatch entries through the guarded import bridge before loading.
+            {0x1b8f84,0xb9407808,0xd0001370},
+            {0x1b8f88,0x7100011f,0xf9419e10},
+            {0x1b8f8c,0x1a9f07e0,0xd61f0200},
+            {0x1b8f90,0xd65f03c0,0xd503201f},
+            {0x1b91f4,0x52801908,0xb0001370},
+            {0x1b91f8,0xf9400c09,0xf9419e10},
+            {0x1b91fc,0xd503201f,0xd61f0200},
+            {0x1b9200,0x9ba82428,0xd503201f}};
         for(int[] change:changes){
             if(code.getInt(change[0])!=change[1])throw new SecurityException("Demux instruction mismatch");
             code.putInt(change[0],change[2]);
@@ -229,6 +238,7 @@ final class OfficialRuntime {
             bridge("installMediaInspection");
             bridge("installFirstSeek");
             bridge("installMediaDash");
+            bridge("installMediaSwitch");
             boolean networkReadBaseline="profile".equals(com.example.piliplus.BuildConfig.BUILD_TYPE) &&
                 new File(context.getExternalFilesDir(null),"research259-network-baseline").isFile();
             bridge("installNetworkRead",!networkReadBaseline);
