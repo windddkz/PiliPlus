@@ -185,6 +185,8 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                 if(closing || waitingOpen!=null){result.error("open_pending","Another video open is pending",null);return;}
                 if(BuildConfig.DEBUG)data.putBoolean("videoTrace",Boolean.TRUE.equals(call.argument("videoTrace")));
                 data.putBoolean("audioOnly", Boolean.TRUE.equals(call.argument("audioOnly")));
+                data.putBoolean("flipX", Boolean.TRUE.equals(call.argument("flipX")));
+                data.putBoolean("flipY", Boolean.TRUE.equals(call.argument("flipY")));
                 for (String key : new String[]{"source", "audio", "userAgent", "referer"}) {
                     String value = call.argument(key); if (value != null) data.putString(key, value);
                 }
@@ -219,6 +221,13 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
             case "seek": data.putLong("position", number(call, "position", -1).longValue()); break;
             case "speed": data.putFloat("speed", number(call, "speed", Float.NaN).floatValue()); break;
             case "volume": data.putFloat("volume", number(call, "volume", Float.NaN).floatValue()); break;
+            case "mirror":
+                if(!(call.argument("flipX") instanceof Boolean) || !(call.argument("flipY") instanceof Boolean)) {
+                    result.error("invalid_mirror","Both mirror axes are required",null);return;
+                }
+                data.putLong("load",number(call,"load",-1).longValue());
+                data.putBoolean("flipX",(Boolean)call.argument("flipX"));
+                data.putBoolean("flipY",(Boolean)call.argument("flipY"));break;
             case "play": case "pause": break;
             case "dispose": closing=true;cancelWaitingOpen("disposed");send("close",data,result,this::cleanup);return;
             default: result.notImplemented(); return;

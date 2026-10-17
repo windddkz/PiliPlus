@@ -547,7 +547,7 @@ class HeaderControlState extends State<HeaderControl>
                           return ActionRowLineItem(
                             iconData: Icons.flip,
                             onTap: () =>
-                                plPlayerController.flipX.value = !flipX,
+                                plPlayerController.toggleVideoMirror(true),
                             text: " 左右翻转 ",
                             selectStatus: flipX,
                           );
@@ -564,9 +564,8 @@ class HeaderControlState extends State<HeaderControl>
                                   ? theme.colorScheme.onSecondaryContainer
                                   : theme.colorScheme.outline,
                             ),
-                            onTap: () {
-                              plPlayerController.flipY.value = !flipY;
-                            },
+                            onTap: () =>
+                                plPlayerController.toggleVideoMirror(false),
                             text: " 上下翻转 ",
                             selectStatus: flipY,
                           );

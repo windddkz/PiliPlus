@@ -78,6 +78,54 @@ void main() {
     audioOnly: false,
   );
 
+  test(
+    'mirror axes follow the source load and default to reset on a new source',
+    () async {
+      final p = await create();
+      final first = p.openSource(
+        NetworkSource(
+          videoSource: 'https://example.invalid/video',
+          audioSource: null,
+        ),
+        userAgent: 'test',
+        referer: 'https://example.invalid/',
+        audioOnly: false,
+        flipX: true,
+        flipY: true,
+      );
+      await emit({'event': 'prepared'});
+      await first;
+      final initial =
+          calls.lastWhere((c) => c.method == 'open').arguments as Map;
+      expect(initial['flipX'], true);
+      expect(initial['flipY'], true);
+      await p.setMirror(false, true);
+      expect(calls.last.arguments, {
+        'session': 7,
+        'load': 1,
+        'flipX': false,
+        'flipY': true,
+      });
+      final second = open(p);
+      await emit({'event': 'prepared', 'load': 2});
+      await second;
+      final reset = calls.lastWhere((c) => c.method == 'open').arguments as Map;
+      expect(reset['flipX'], false);
+      expect(reset['flipY'], false);
+      await p.setMirror(true, false);
+      expect(calls.last.arguments, {
+        'session': 7,
+        'load': 2,
+        'flipX': true,
+        'flipY': false,
+      });
+      await p.dispose();
+      final count = calls.length;
+      await expectLater(p.setMirror(false, false), throwsStateError);
+      expect(calls.length, count);
+    },
+  );
+
   test('safe exit diagnostics survive fallback, private details do not', () {
     expect(
       OfficialPlayer.failureCode(

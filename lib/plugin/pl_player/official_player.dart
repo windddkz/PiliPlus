@@ -118,6 +118,8 @@ class OfficialPlayer extends PlatformPlayer {
     required String userAgent,
     required String referer,
     required bool audioOnly,
+    bool flipX = false,
+    bool flipY = false,
     String loudnessMode = 'off',
     List<num?>? loudnessValues,
     Map<String, String>? loudnessScenes,
@@ -155,6 +157,8 @@ class OfficialPlayer extends PlatformPlayer {
       await _send('open', {
         'load': _load,
         'audioOnly': audioOnly,
+        'flipX': flipX,
+        'flipY': flipY,
         'source': audioOnly && source.audioSource != null
             ? source.audioSource
             : source.videoSource,
@@ -309,6 +313,11 @@ class OfficialPlayer extends PlatformPlayer {
 
   @override
   Future<void> play() => _send('play');
+  Future<void> setMirror(bool horizontal, bool vertical) => _send('mirror', {
+    'load': _load,
+    'flipX': horizontal,
+    'flipY': vertical,
+  });
   @override
   Future<void> pause() => _send('pause');
   @override

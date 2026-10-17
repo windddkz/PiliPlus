@@ -264,6 +264,20 @@ class PlPlayerController
 
   late final RxBool flipY = false.obs;
 
+  Future<void> toggleVideoMirror(bool horizontal) => _enqueuePlayer(() async {
+    final x = horizontal ? !flipX.value : flipX.value;
+    final y = horizontal ? flipY.value : !flipY.value;
+    try {
+      if (_videoPlayerController case final OfficialPlayer player) {
+        await player.setMirror(x, y);
+      }
+      flipX.value = x;
+      flipY.value = y;
+    } catch (error) {
+      SmartDialog.showToast('画面翻转失败：${OfficialPlayer.failureCode(error)}');
+    }
+  });
+
   final RxBool isBuffering = true.obs;
 
   /// 全屏方向
@@ -1039,6 +1053,8 @@ class PlPlayerController
           dataSource,
           position: seekTo,
           audioOnly: onlyPlayAudio.value,
+          flipX: flipX.value,
+          flipY: flipY.value,
           loudnessMode: Pref.officialLoudnessMode,
           loudnessValues: volume?.officialValues,
           loudnessScenes: volume?.multiSceneArgs,

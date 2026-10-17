@@ -21,7 +21,7 @@ final class OfficialRuntime {
     private final Handler worker;
     private final Events events;
     private DexClassLoader loader;
-    private Object player, item, externalRenderer;
+    private Object player, item, externalRenderer, externalOutput;
     private OfficialAudioRoute route;
     private Surface outputSurface;
     private Bundle openRequest;
@@ -276,7 +276,7 @@ final class OfficialRuntime {
                 invoke(cls("tv.danmaku.ijk.media.player.render.core.BiliRenderContext"),"init",context);
                 cls("tv.danmaku.ijk.media.player.render.IjkExternalRenderThread").getField("EXTERNAL_RENDER_TYPE").setInt(null,0);
                 externalRenderer=construct("tv.danmaku.ijk.media.player.render.IjkExternalRenderThread");
-                Object render=construct("tv.danmaku.ijk.media.player.render.output.IJKPlayerExternalRender");
+                Object render=externalOutput=construct("tv.danmaku.ijk.media.player.render.output.IJKPlayerExternalRender");
                 invoke(externalRenderer,"setRenderCallback",render);
                 Object pauseCallback=Proxy.newProxyInstance(loader,new Class<?>[]{cls("tv.danmaku.ijk.media.player.render.IjkExternalRenderThread$GetPlayerPauseStateCallback")},(proxy,method,args)->{
                     switch(method.getName()) {
@@ -290,6 +290,7 @@ final class OfficialRuntime {
                 invoke(externalRenderer,"setPlayerPauseStateCallback",pauseCallback);
                 invoke(externalRenderer,"setAspectRatio",1,1);
                 if(!Boolean.TRUE.equals(invoke(externalRenderer,"createWindowSurface",surface)))throw new IOException("Official output window failed");
+                mirror(request);
                 Surface decoderSurface=(Surface)invoke(externalRenderer,"getAmcSurface");
                 if(decoderSurface==null||!decoderSurface.isValid())throw new IOException("Official input surface invalid");
                 invoke(player,"setSurface",decoderSurface);
@@ -360,6 +361,13 @@ final class OfficialRuntime {
             else if(!Boolean.TRUE.equals(invoke(externalRenderer,"createWindowSurface",surface)))throw new IOException("Official output replacement failed");
         } else if(player!=null){invoke(player,"setSurface",surface);if(surface!=null&&width>0&&height>0)invoke(player,"setSurfaceSize",width,height);}
     }
+    void mirror(Bundle request) throws Exception {
+        if(openRequest==null || request.getLong("load",1)!=load)throw new IllegalStateException("Mirror requires current source");
+        boolean x=request.getBoolean("flipX",false),y=request.getBoolean("flipY",false);
+        // Signed scales keep both axes independent; the original mirror API shares its axis selector.
+        if(externalOutput!=null)invoke(externalOutput,"scale",x?-1f:1f,y?-1f:1f);
+        openRequest.putBoolean("flipX",x);openRequest.putBoolean("flipY",y);
+    }
     void play(boolean value) throws Exception {wantedPlaying=value;if(prepared)invoke(player,value?"start":"pause");}
     void seek(long position) throws Exception {
         if(!prepared||position<0)throw new IllegalStateException("Seek requires prepared player and valid position");
@@ -378,7 +386,7 @@ final class OfficialRuntime {
         if(route!=null){route.stop();route=null;}
         if(player!=null){invoke(player,"release");player=null;}
         if(item!=null){invoke(item,"release");item=null;}
-        if(externalRenderer!=null){invoke(externalRenderer,"quitExternalRender");externalRenderer=null;}
+        if(externalRenderer!=null){invoke(externalRenderer,"quitExternalRender");externalRenderer=null;externalOutput=null;}
         if(graphActive){JSONObject result=new JSONObject((String)bridge("finishGraphAdapter"));graphActive=false;
             if(com.example.piliplus.BuildConfig.DEBUG && result.optBoolean("video_trace_enabled")) {
                 int rows=(Integer)bridge("finishVideoTrace",new File(context.getFilesDir(),"official-video-trace.tsv").getPath());
