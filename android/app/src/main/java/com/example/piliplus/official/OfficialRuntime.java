@@ -132,23 +132,56 @@ final class OfficialRuntime {
             if(code.getInt(change[0])!=change[1])throw new SecurityException("Player instruction mismatch");
             code.putInt(change[0],change[2]);
         }
+        return writeImage(directory,"libijk.so","player-",bytes);
+    }
+    static File demuxImage(File directory) throws Exception {
+        byte[] bytes;
+        try(InputStream in=new FileInputStream(new File(directory,"libijkffext.so"));ByteArrayOutputStream out=new ByteArrayOutputStream()){
+            byte[] buffer=new byte[65536];for(int n;(n=in.read(buffer))!=-1;)out.write(buffer,0,n);bytes=out.toByteArray();
+        }
+        if(!hash(bytes).equals("3fb5d9872b71c2fafe2dff810f6cc40fa30e379527df268db41d7e952fba7d3e"))
+            throw new SecurityException("Unexpected demux image");
+        ByteBuffer code=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+        // Snapshot count and EOF under the queue lock; the producer may append its final batch when unlocked.
+        int[][] changes={{0x1b5288,0x7100029f,0xb94012b4},{0x1b528c,0x5400030d,0x34000314},
+            {0x1b52f8,0xf9415ac8,0xb9402ab3},{0x1b52fc,0xf9401100,0xf94012a0},
+            {0x1b530c,0xb9402913,0xd503201f}};
+        for(int[] change:changes){
+            if(code.getInt(change[0])!=change[1])throw new SecurityException("Demux instruction mismatch");
+            code.putInt(change[0],change[2]);
+        }
+        return writeImage(directory,"libijkffext.so","demux-",bytes);
+    }
+    private static File writeImage(File directory,String name,String prefix,byte[] bytes) throws Exception {
         String expected=hash(bytes);
-        File folder=new File(directory,"player-"+expected);
-        if(!folder.isDirectory()&&!folder.mkdirs())throw new IOException("Cannot create player image directory");
-        File image=new File(folder,"libijk.so");
+        File folder=new File(directory,prefix+expected);
+        if(!folder.isDirectory()&&!folder.mkdirs())throw new IOException("Cannot create native image directory");
+        File image=new File(folder,name);
         if(!image.exists()){
-            File temporary=File.createTempFile("player-",".tmp",folder);
+            File temporary=File.createTempFile(prefix,".tmp",folder);
             try {
                 try(OutputStream out=new FileOutputStream(temporary)){
-                    if(!temporary.setReadOnly())throw new IOException("Cannot protect player image");
+                    if(!temporary.setReadOnly())throw new IOException("Cannot protect native image");
                     out.write(bytes);
                 }
                 if(!expected.equals(hash(temporary)))throw new SecurityException("Player image write mismatch");
-                if(!temporary.renameTo(image))throw new IOException("Cannot install player image");
+                if(!temporary.renameTo(image))throw new IOException("Cannot install native image");
             }finally{temporary.delete();}
         }
-        if(!expected.equals(hash(image)))throw new SecurityException("Cached player image mismatch");
+        if(!expected.equals(hash(image)))throw new SecurityException("Cached native image mismatch");
         return folder;
+    }
+    static void verifyMappedImage(File image,Reader maps) throws Exception {
+        String expected=image.getCanonicalPath(),suffix="/"+image.getName();boolean found=false;
+        BufferedReader lines=new BufferedReader(maps);
+        for(String line;(line=lines.readLine())!=null;){
+            int start=line.indexOf('/');if(start<0)continue;
+            String path=line.substring(start);
+            if(!path.endsWith(suffix)&&!path.endsWith(suffix+" (deleted)"))continue;
+            if(!new File(path).getCanonicalPath().equals(expected))throw new SecurityException("Unexpected mapped native image");
+            found=true;
+        }
+        if(!found)throw new SecurityException("Native image not mapped");
     }
     void initialize() throws Exception {
         if(loader!=null)return;
@@ -163,13 +196,14 @@ final class OfficialRuntime {
         JSONObject original=manifest.getJSONObject("files"),owned=manifest.getJSONObject("owned"),code=manifest.getJSONObject("code");
         if(!"audio_engine".equals(manifest.getString("engine"))||!"arm64-v8a".equals(manifest.getString("abi"))||original.length()!=9||owned.length()!=3||code.length()!=1||!code.has("official.apk"))
             throw new SecurityException("Unexpected runtime set");
-        File directory=new File(context.getFilesDir(),"official-runtime/"+hash(("platform-loader-v1:"+hash(bytes)).getBytes("UTF-8")));
+        File directory=new File(context.getFilesDir(),"official-runtime/"+hash(("platform-loader-v2:"+hash(bytes)).getBytes("UTF-8")));
         if(!directory.isDirectory()&&!directory.mkdirs())throw new IOException("Cannot create runtime directory");
         for(JSONObject group:new JSONObject[]{original,owned,code})for(Iterator<String> it=group.keys();it.hasNext();) {
             String name=it.next();materialize(directory,name,group.getString(name));
         }
         stage("runtime_image");
         File playerDirectory=playerImage(directory);
+        File demuxDirectory=demuxImage(directory);
         // Run before loading any native library; rollback rebuilds its own assets from its APK.
         OfficialRuntimeCache.Result cache=OfficialRuntimeCache.prune(directory.getParentFile(),directory.getName());
         Bundle cacheEvent=new Bundle();cacheEvent.putString("event","runtime_cache_cleanup");
@@ -177,7 +211,7 @@ final class OfficialRuntime {
         cacheEvent.putInt("failedDirectories",cache.failedDirectories);emit(cacheEvent);
         // Standard platform-parent loading preserves Java isolation and a compilable ART context.
         loader=new DexClassLoader(new File(directory,"official.apk").getPath()+File.pathSeparator+new File(directory,"audio-bridge-v1.dex").getPath(),
-            context.getCodeCacheDir().getPath(),playerDirectory.getPath()+File.pathSeparator+directory.getPath(),Context.class.getClassLoader());
+            context.getCodeCacheDir().getPath(),playerDirectory.getPath()+File.pathSeparator+demuxDirectory.getPath()+File.pathSeparator+directory.getPath(),Context.class.getClassLoader());
         try {
             stage("foundation");
             invoke(cls("com.bilibili.lib.foundation.Foundation"),"init",context,
@@ -185,6 +219,9 @@ final class OfficialRuntime {
                 construct("com.bilibili.lib.foundation.Foundation$Configuration"));
             stage("library_load");
             invoke(cls("com.bilibili.ijk.utils.IJKLibLoader").getField("INSTANCE").get(null),"ensureLoaded");
+            File demux=new File(demuxDirectory,"libijkffext.so");
+            try(Reader maps=new FileReader("/proc/self/maps")){verifyMappedImage(demux,maps);}
+            android.util.Log.i("PiliRuntimeImage","verified "+demux.getPath());
             Object logger=construct("com.bilibili.ijk.utils.IJKLog");invoke(logger,"initLogger",false,null,2);
             Field singleton=logger.getClass().getDeclaredField("instance");singleton.setAccessible(true);singleton.set(null,logger);
             stage("dsp_register");
