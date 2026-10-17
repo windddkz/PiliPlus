@@ -357,6 +357,9 @@ public final class OfficialPlayerPlugin
         }
         Bundle data = new Bundle();
         switch (call.method) {
+            case "preloadControl":
+                data.putBoolean("enabled", Boolean.TRUE.equals(call.argument("enabled")));
+                break;
             case "preload":
                 if (closing) {
                     result.error("closing", "Player session is closing", null);
@@ -509,6 +512,7 @@ public final class OfficialPlayerPlugin
                 fields.get("bandwidth"), fields.get("backups"), fields.get("codecs"));
     }
     private static void putSources(MethodCall call, Bundle data) {
+        data.putString("preloadScope", call.argument("preloadScope"));
         for (String key : new String[] {"source", "audio", "userAgent", "referer"}) {
             String value = call.argument(key);
             if (value != null)
@@ -644,6 +648,8 @@ public final class OfficialPlayerPlugin
                                     ? values("videoCodecs", data.getStringArrayList("videoCodecs"))
                                     : operation.op.equals("screenshot")
                                     ? data.getString("screenshot")
+                                    : operation.op.equals("preload")
+                                    ? data.getString("preloadState")
                                     : null);
             }
         } else if (message.what == OfficialPlaybackService.EVENT) {
@@ -744,7 +750,7 @@ public final class OfficialPlayerPlugin
         pending.clear();
         if (keepRuntime && remote != null && bound) {
             // Only an acknowledged full native release may leave an idle runtime alive.
-            ui.postDelayed(retireIdle, 30000);
+            ui.postDelayed(retireIdle, OfficialMediaCache.TTL_MILLIS);
         } else
             disconnect();
         surface = null; // SurfaceHolder owns this borrowed Surface.

@@ -419,6 +419,53 @@ public final class OfficialPreloadCacheTest {
                 timer.run();
             check(!c.isBroken());
         }
-        System.out.println("22 ownership scenarios passed");
+        {
+            Fake f = new Fake();
+            OfficialPreloadCache<String> c =
+                    new OfficialPreloadCache<>(f, f, () -> f.now, 8, 1200000);
+            for (int i = 0; i < 8; i++)
+                check(c.add("k" + i, "item" + i));
+            check(c.size() == 8 && c.preparing() == 8);
+            long last = f.task;
+            c.event(0, last, "READY", 0);
+            check(c.preparing() == 7 && c.ready("k7") && c.ready(last).equals("item7"));
+            check(!c.add("overflow", "overflow"));
+            check(f.task == last && f.calls.contains("remove:item7"));
+            check(f.calls.contains("release:overflow") && c.size() == 8);
+            check(c.ready(last) == null && !c.ready("k7"));
+            c.event(f.request, last, "REMOVED", 0);
+            check(c.size() == 7 && !c.isBroken());
+        }
+        {
+            Fake f = new Fake();
+            OfficialPreloadCache<String> c =
+                    new OfficialPreloadCache<>(f, f, () -> f.now, 8, 1200000);
+            check(c.add("a", "item"));
+            long task = f.task;
+            c.event(0, task, "READY", 0);
+            f.now = 60000;
+            f.timers.get(0).run();
+            check(c.ready("a") && !f.calls.contains("remove:item"));
+            f.now = 1200000;
+            f.timers.get(f.timers.size() - 1).run();
+            check(!c.ready("a") && f.calls.contains("remove:item"));
+            c.event(f.request, task, "REMOVED", 0);
+            check(c.size() == 0 && !c.isBroken());
+        }
+        {
+            Fake f = new Fake();
+            OfficialPreloadCache<String> c =
+                    new OfficialPreloadCache<>(f, f, () -> f.now, 8, 1200000);
+            check(c.add("a", "item"));
+            long task = f.task;
+            c.event(0, task, "READY", 0);
+            c.discardExcept(null);
+            long removal = f.request;
+            c.event(0, task, "READY", 0);
+            check(!c.ready("a") && c.ready(task) == null && c.preparing() == 0);
+            c.event(removal, task, "REMOVED", 0);
+            check(c.size() == 0 && f.calls.stream().filter("release:item" ::equals).count() == 1);
+        }
+        System.out.println("25 ownership and retained-pool scenarios passed");
     }
 }

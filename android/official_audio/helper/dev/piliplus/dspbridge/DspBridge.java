@@ -8,6 +8,7 @@ public final class DspBridge {
     }
     public static native String registerDsp();
     public static native void installMediaInspection();
+    public static native void installMediaCache(String directory);
     public static native void installFirstSeek();
     public static native void installMediaDash();
     public static native void installMediaSwitch();

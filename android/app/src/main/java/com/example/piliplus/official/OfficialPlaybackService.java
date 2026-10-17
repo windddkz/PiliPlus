@@ -100,6 +100,7 @@ public final class OfficialPlaybackService extends Service {
                     || session != data.getLong("session")) {
                 throw new SecurityException("Stale session");
             }
+            String preloadState = null;
             switch (op) {
                 case "create":
                     break;
@@ -107,7 +108,10 @@ public final class OfficialPlaybackService extends Service {
                     runtime.initialize();
                     break;
                 case "preload":
-                    runtime.preload(data);
+                    preloadState = runtime.preload(data);
+                    break;
+                case "preloadControl":
+                    runtime.enablePreloads(data.getBoolean("enabled"));
                     break;
                 case "open":
                     runtime.open(data, data.getBoolean("awaitOutput") ? null : surface);
@@ -174,6 +178,8 @@ public final class OfficialPlaybackService extends Service {
             Bundle reply = new Bundle();
             reply.putBoolean("ok", true);
             reply.putInt("pid", android.os.Process.myPid());
+            if (preloadState != null)
+                reply.putString("preloadState", preloadState);
             if (op.equals("warmUp"))
                 reply.putStringArrayList("videoCodecs", runtime.preferredVideoCodecs());
             send(REPLY, message.arg1, reply);
@@ -212,6 +218,17 @@ public final class OfficialPlaybackService extends Service {
         } finally {
             message.recycle();
         }
+    }
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (level >= TRIM_MEMORY_RUNNING_LOW && worker != null)
+            worker.post(() -> {
+                try {
+                    runtime.trimPreloads();
+                } catch (Exception ignored) { /* The existing ownership timeout remains active. */
+                }
+            });
     }
     @Override
     public boolean onUnbind(Intent intent) {

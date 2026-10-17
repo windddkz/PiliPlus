@@ -35,19 +35,25 @@ final class OfficialRuntime {
     private NativeMedia awaitingOutput;
     private OfficialMediaCache mediaCache;
     private boolean mediaCacheAttempted;
-    private Object cachedItemOption;
-    private final Map<Object, File> itemCaches = new IdentityHashMap<>();
+    private final Map<Object, OfficialMediaCache.Lease> itemCaches = new IdentityHashMap<>();
     private final ThreadPoolExecutor preloadProbeWorker =
             new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(2),
                     r -> new Thread(r, "official-preload-probe"));
     private final Map<String, PreloadProbe> preloadProbes = new HashMap<>();
     private final Map<String, Bundle> pendingPreloads = new LinkedHashMap<>();
     private long preloadEpoch, awaitingPreload;
+    private boolean preloadsEnabled = true, preloadsPaused, playbackBuffering;
+    private long playbackBuffered;
+    private long preloadPermitUntil;
+    private String preloadScope;
+    private final Map<String, String> storedPreloads = new LinkedHashMap<>();
     private static final class NativeMedia {
         final Object asset;
         final boolean hdr, nativeMetadata;
         Object item;
         long preloadTarget = 2000;
+        String preloadKey, mediaKey;
+        boolean preloadComplete;
         NativeMedia(Object asset, boolean hdr, boolean nativeMetadata) {
             this.asset = asset;
             this.hdr = hdr;
@@ -57,6 +63,7 @@ final class OfficialRuntime {
     private static final class PreloadProbe {
         final long epoch;
         Future<DashSource[]> future;
+        Bundle request;
         PreloadProbe(long epoch) {
             this.epoch = epoch;
         }
@@ -365,6 +372,8 @@ final class OfficialRuntime {
             stage("dsp_register");
             bridge("registerDsp");
             bridge("installMediaInspection");
+            bridge("installMediaCache",
+                    new File(context.getCacheDir(), "official-media").getCanonicalPath());
             bridge("installFirstSeek");
             bridge("installMediaDash");
             bridge("installMediaSwitch");
@@ -531,6 +540,7 @@ final class OfficialRuntime {
                             emitQuality();
                         }
                         prepared = true;
+                        playbackBuffering = false;
                         stage("playback");
                         if (route.endpoint() != appliedEndpoint)
                             applyRoute();
@@ -595,7 +605,9 @@ final class OfficialRuntime {
                     case "buffering":
                         Bundle b = new Bundle();
                         b.putString("event", "buffering");
-                        b.putBoolean("buffering", (Boolean) args[1]);
+                        playbackBuffering = (Boolean) args[1];
+                        b.putBoolean("buffering", playbackBuffering);
+                        drainPreloads();
                         emit(b);
                         break;
                     default:
@@ -811,11 +823,12 @@ final class OfficialRuntime {
                 mediaType == 0 ? track.videoCodec() : -1, track.id, track.bandwidth, track.source,
                 track.backups);
     }
-    private Object nativeItem(Object asset, long position) throws Exception {
+    private Object nativeItem(Object asset, long position, Bundle request) throws Exception {
         Object render = cls("com.bilibili.ijk.player.RenderPath").getField("Direct").get(null);
         Object unit = cls("kotlin.time.DurationUnit").getField("MILLISECONDS").get(null);
         long duration = (Long) invoke(cls("kotlin.time.DurationKt"), "toDuration", position, unit);
-        File cache = null;
+        OfficialMediaCache.Lease cache = null;
+        Object cachedItemOption = null;
         if (asset.getClass().getName().endsWith("$Dash")
                 && "VOD".equals(invoke(asset, "getScheme").toString())
                 && invoke(asset, "getDrm") == null) {
@@ -823,10 +836,22 @@ final class OfficialRuntime {
                 if (!mediaCacheAttempted) {
                     mediaCacheAttempted = true;
                     mediaCache = new OfficialMediaCache(
-                            new File(context.getCacheDir(), "official-media"));
+                            new File(context.getCacheDir(), "official-media").getCanonicalFile());
+                    scheduleMediaCachePrune();
                 }
-                if (mediaCache != null)
-                    cache = mediaCache.acquire(context.getCacheDir().getUsableSpace());
+                if (mediaCache != null) {
+                    List<?> videos = (List<?>) invoke(asset, "getVideoStreamList");
+                    List<?> audios = (List<?>) invoke(asset, "getAudioStreamList");
+                    Set<Object> ids = new HashSet<>();
+                    for (Object stream : videos)
+                        ids.add(invoke(stream, "getQn"));
+                    for (Object stream : audios)
+                        ids.add(invoke(stream, "getQn"));
+                    int count = videos.size() + audios.size();
+                    if (ids.size() == count)
+                        cache = mediaCache.acquire(preloadKey(request, false), count,
+                                context.getCacheDir().getUsableSpace());
+                }
             } catch (IOException | SecurityException error) {
                 android.util.Log.w(
                         "PiliMediaCache", "cache unavailable: " + error.getClass().getSimpleName());
@@ -834,37 +859,33 @@ final class OfficialRuntime {
         }
         try {
             if (cache != null) {
-                if (cachedItemOption == null) {
-                    Object defaults = construct("com.bilibili.ijk.player.ItemOption");
-                    Object[] values = new Object[35];
-                    for (int i = 0; i < values.length; i++)
-                        values[i] = invoke(defaults, "component" + (i + 1));
-                    values[14] = 0;
-                    Map<String, String> custom = new HashMap<>();
-                    for (Map.Entry<?, ?> entry : ((Map<?, ?>) values[34]).entrySet())
-                        custom.put((String) entry.getKey(), (String) entry.getValue());
-                    custom.put("cache_max_capacity", Long.toString(OfficialMediaCache.TRACK_BYTES));
-                    values[34] = custom;
-                    cachedItemOption = invoke(defaults, "copy", values);
-                    JSONObject encoded =
-                            new JSONObject((String) invoke(cachedItemOption, "toJson"));
-                    if (encoded.getInt("cache_file_close") != 0
-                            || encoded.getLong("cache_max_capacity")
-                                    != OfficialMediaCache.TRACK_BYTES)
-                        throw new IOException("Invalid cache options");
-                }
+                Object defaults = construct("com.bilibili.ijk.player.ItemOption");
+                Object[] values = new Object[35];
+                for (int i = 0; i < values.length; i++)
+                    values[i] = invoke(defaults, "component" + (i + 1));
+                values[14] = 0;
+                Map<String, String> custom = new HashMap<>();
+                for (Map.Entry<?, ?> entry : ((Map<?, ?>) values[34]).entrySet())
+                    custom.put((String) entry.getKey(), (String) entry.getValue());
+                custom.put("cache_max_capacity", Long.toString(cache.trackBytes));
+                values[34] = custom;
+                cachedItemOption = invoke(defaults, "copy", values);
+                JSONObject encoded = new JSONObject((String) invoke(cachedItemOption, "toJson"));
+                if (encoded.getInt("cache_file_close") != 0
+                        || encoded.getLong("cache_max_capacity") != cache.trackBytes)
+                    throw new IOException("Invalid cache options");
                 Map<String, String> options = new HashMap<>();
                 for (Map.Entry<?, ?> entry : ((Map<?, ?>) invoke(asset, "getOption")).entrySet())
                     options.put((String) entry.getKey(), (String) entry.getValue());
-                options.put("cache_dir", cache.getPath());
+                options.put("cache_dir", cache.directory.getPath());
                 asset = construct("com.bilibili.ijk.media.MediaAsset$Dash",
                         invoke(asset, "getCurAudioQn"), invoke(asset, "getCurVideoQn"),
                         invoke(asset, "getVideoStreamList"), invoke(asset, "getAudioStreamList"),
                         invoke(asset, "getScheme"), options, null);
             }
             Object descriptor = construct("com.bilibili.ijk.player.PlayerItem", asset, duration,
-                    false, 0, null, cache == null ? null : cachedItemOption, 0, 0, render,
-                    cache == null ? 252 : 220, null);
+                    position > 0, 0, null, cache == null ? null : cachedItemOption, 0, 0, render,
+                    cache == null ? 248 : 216, null);
             Object created =
                     construct("com.bilibili.ijk.player.AndroidNativePlayerItem", descriptor);
             if (cache != null) {
@@ -875,7 +896,7 @@ final class OfficialRuntime {
         } catch (Exception | LinkageError error) {
             if (cache != null)
                 try {
-                    mediaCache.release(cache);
+                    mediaCache.release(cache, false);
                 } catch (IOException cleanup) {
                     error.addSuppressed(cleanup);
                 }
@@ -885,10 +906,10 @@ final class OfficialRuntime {
     private void releaseItem(Object released) throws Exception {
         // Release only after the player or preloader has acknowledged losing its native ownership.
         invoke(released, "release");
-        File cache = itemCaches.remove(released);
+        OfficialMediaCache.Lease cache = itemCaches.remove(released);
         if (cache != null) {
             try {
-                mediaCache.release(cache);
+                mediaCache.release(cache, true);
                 android.util.Log.i("PiliMediaCache", "released retained=" + mediaCache.retained());
             } catch (IOException | SecurityException error) {
                 android.util.Log.w(
@@ -896,7 +917,22 @@ final class OfficialRuntime {
             }
         }
     }
+    private void scheduleMediaCachePrune() {
+        worker.postDelayed(() -> {
+            if (mediaCache == null)
+                return;
+            try {
+                mediaCache.prune();
+            } catch (IOException | SecurityException error) {
+                android.util.Log.w("PiliMediaCache", "expiry cleanup deferred");
+            }
+            scheduleMediaCachePrune();
+        }, 60000);
+    }
     private String preloadKey(Bundle request) throws Exception {
+        return preloadKey(request, true);
+    }
+    private String preloadKey(Bundle request, boolean withPosition) throws Exception {
         String token = request.getString("preloadToken");
         if (token == null)
             return null;
@@ -905,7 +941,8 @@ final class OfficialRuntime {
         OfficialVideoTracks policy = videoPolicy(request);
         JSONObject key = new JSONObject();
         key.put("token", token);
-        key.put("position", request.getLong("position", 0));
+        if (withPosition)
+            key.put("position", request.getLong("position", 0));
         for (String name : new String[] {"source", "audio", "userAgent", "referer"})
             key.put(name, request.getString(name, ""));
         for (String name : new String[] {"sourceTrack", "audioTrack"}) {
@@ -955,7 +992,19 @@ final class OfficialRuntime {
         if (preloader != null)
             throw new IOException("Preloader initialization previously failed");
         preloader = construct("com.bilibili.ijk.preload.IJKNativePreloader");
-        preloads = createPreloadCache(preloader, 3);
+        preloads = createPreloadCache(preloader, 8);
+        watchPreloads();
+    }
+    private void watchPreloads() {
+        worker.postDelayed(() -> {
+            try {
+                drainPreloads();
+            } catch (Exception error) {
+                preloadFailure(error);
+            }
+            if (preloads != null && !preloads.isBroken())
+                watchPreloads();
+        }, 1000);
     }
     private void ensureForegroundPreloader() throws Exception {
         if (foregroundPreloads != null)
@@ -996,6 +1045,12 @@ final class OfficialRuntime {
                     }
                     public void release(NativeMedia media) throws Exception {
                         releaseItem(media.item);
+                        if (media.preloadComplete && mediaCache != null
+                                && mediaCache.contains(media.mediaKey)) {
+                            storedPreloads.put(media.preloadKey, media.mediaKey);
+                            while (storedPreloads.size() > 128)
+                                storedPreloads.remove(storedPreloads.keySet().iterator().next());
+                        }
                     }
                     public void failed(Exception error) {
                         preloadFailure(owner, error);
@@ -1003,7 +1058,8 @@ final class OfficialRuntime {
                 },
                 (delay, action)
                         -> worker.postDelayed(action, delay),
-                SystemClock::elapsedRealtime, capacity);
+                SystemClock::elapsedRealtime, capacity,
+                capacity == 1 ? 30000 : OfficialMediaCache.TTL_MILLIS);
         Object cb = Proxy.newProxyInstance(loader,
                 new Class<?>[] {cls("kotlin.jvm.functions.Function1")}, (proxy, method, args) -> {
                     switch (method.getName()) {
@@ -1022,6 +1078,9 @@ final class OfficialRuntime {
                                     long request = (Long) invoke(event, "getRequestId"),
                                          task = (Long) invoke(event, "getTaskId");
                                     cache.event(request, task, type, error);
+                                    NativeMedia ready = cache.ready(task);
+                                    if (ready != null && owner == preloader)
+                                        ready.preloadComplete = true;
                                     if (owner == preloader)
                                         drainPreloads();
                                     if (com.example.piliplus.BuildConfig.DEBUG)
@@ -1043,8 +1102,9 @@ final class OfficialRuntime {
         invoke(owner, "setEventCallback", cb);
         return cache;
     }
-    void preload(Bundle data) throws Exception {
+    String preload(Bundle data) throws Exception {
         initialize();
+        syncPreloadScope(data);
         String key = preloadKey(data);
         if (key == null || data.getLong("position", 0) < 0)
             throw new IllegalArgumentException("Invalid preload request");
@@ -1058,26 +1118,79 @@ final class OfficialRuntime {
         for (String header : new String[] {ua, referer})
             if (header.length() > 4096 || header.contains("\r") || header.contains("\n"))
                 throw new IllegalArgumentException("Invalid source header");
-        if (player != null)
-            return;
         ensurePreloader();
+        preloadsEnabled = true;
+        preloadPermitUntil = SystemClock.elapsedRealtime() + 15000;
         if (preloads.retain(key))
-            return;
-        if (preloads.isBroken() || preloadProbes.containsKey(key))
-            return;
+            return preloads.ready(key) ? "ready" : "queued";
+        String disk = storedPreloads.get(key);
+        if (disk != null && mediaCache != null && mediaCache.contains(disk))
+            return "stored";
+        storedPreloads.remove(key);
+        if (preloads.isBroken())
+            return "unavailable";
+        if (preloadProbes.containsKey(key))
+            return "queued";
         Bundle request = new Bundle(data);
         request.putLong("preloadQueuedAt", SystemClock.elapsedRealtime());
         pendingPreloads.remove(key);
-        if (pendingPreloads.size() >= 3)
+        if (pendingPreloads.size() >= 128)
             pendingPreloads.remove(pendingPreloads.keySet().iterator().next());
         pendingPreloads.put(key, request);
         drainPreloads();
+        return "queued";
+    }
+    void enablePreloads(boolean enabled) throws Exception {
+        preloadsEnabled = enabled;
+        preloadPermitUntil = enabled ? SystemClock.elapsedRealtime() + 15000 : 0;
+        // A page update supplies a newly ordered window; retain native data, replace waiting work.
+        pendingPreloads.clear();
+        if (preloads != null)
+            drainPreloads();
+    }
+    void trimPreloads() throws Exception {
+        enablePreloads(false);
+        takePreloadProbe(null);
+        pendingPreloads.clear();
+        if (preloads != null)
+            preloads.discardExcept(null);
+    }
+    private void syncPreloadScope(Bundle request) throws Exception {
+        String scope = request.getString("preloadScope");
+        if (scope == null)
+            return;
+        if (!scope.matches("[A-Za-z0-9_-]{1,80}"))
+            throw new IllegalArgumentException("Invalid preload scope");
+        if (scope.equals(preloadScope))
+            return;
+        if (preloadScope != null) {
+            trimPreloads();
+            storedPreloads.clear();
+            if (mediaCache != null)
+                mediaCache.clear();
+        }
+        preloadScope = scope;
+    }
+    private boolean mayPreload() {
+        android.net.ConnectivityManager network =
+                context.getSystemService(android.net.ConnectivityManager.class);
+        android.net.NetworkCapabilities capabilities =
+                network.getNetworkCapabilities(network.getActiveNetwork());
+        return preloadsEnabled && SystemClock.elapsedRealtime() < preloadPermitUntil
+                && capabilities != null
+                && capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+                && (player == null || (prepared && !playbackBuffering && playbackBuffered >= 5000));
     }
     private void drainPreloads() throws Exception {
-        if (player != null || preloads.isBroken()) {
-            pendingPreloads.clear();
+        if (preloads == null || preloads.isBroken())
             return;
+        boolean allowed = mayPreload();
+        if (preloadsPaused == allowed) {
+            preloadResult(preloader, allowed ? "resumeAllTask" : "pauseAllTask");
+            preloadsPaused = !allowed;
         }
+        if (!allowed)
+            return;
         while (!pendingPreloads.isEmpty()) {
             String key = pendingPreloads.keySet().iterator().next();
             Bundle request = pendingPreloads.get(key);
@@ -1086,13 +1199,19 @@ final class OfficialRuntime {
                 pendingPreloads.remove(key);
                 continue;
             }
-            if (preloads.size() + preloadProbes.size() >= 3) {
+            if (preloads.preparing() + preloadProbes.size() >= 2)
+                return;
+            if (preloads.size() + preloadProbes.size() >= 8) {
                 preloads.makeRoom();
                 return;
             }
             pendingPreloads.remove(key);
             startPreload(key, request);
         }
+    }
+    private void identifyPreload(NativeMedia media, String key, Bundle request) throws Exception {
+        media.preloadKey = key;
+        media.mediaKey = preloadKey(request, false);
     }
     private void startPreload(String key, Bundle request) throws Exception {
         String source = request.getString("source"), audio = request.getString("audio");
@@ -1102,11 +1221,13 @@ final class OfficialRuntime {
                referer = request.getString("referer", "https://www.bilibili.com/");
         if (useNativeMetadata(video, sound)) {
             NativeMedia media = media(request, null);
-            media.item = nativeItem(media.asset, request.getLong("position", 0));
+            media.item = nativeItem(media.asset, request.getLong("position", 0), request);
+            identifyPreload(media, key, request);
             preloads.add(key, media);
             return;
         }
         PreloadProbe probe = new PreloadProbe(preloadEpoch);
+        probe.request = request;
         preloadProbes.put(key, probe);
         if (com.example.piliplus.BuildConfig.DEBUG)
             android.util.Log.d("PiliPreload", "probe queued");
@@ -1120,11 +1241,17 @@ final class OfficialRuntime {
                         if (preloadProbes.get(key) != probe)
                             return;
                         preloadProbes.remove(key);
-                        if (probe.epoch != preloadEpoch || player != null || preloads.isBroken())
+                        if (probe.epoch != preloadEpoch || preloads.isBroken())
                             return;
                         try {
+                            if (!mayPreload()) {
+                                pendingPreloads.put(key, request);
+                                return;
+                            }
                             NativeMedia media = media(request, tracks);
-                            media.item = nativeItem(media.asset, request.getLong("position", 0));
+                            media.item = nativeItem(
+                                    media.asset, request.getLong("position", 0), request);
+                            identifyPreload(media, key, request);
                             preloads.add(key, media);
                             drainPreloads();
                         } catch (Exception error) {
@@ -1155,9 +1282,10 @@ final class OfficialRuntime {
     }
     private PreloadProbe takePreloadProbe(String key) {
         ++preloadEpoch;
-        pendingPreloads.clear();
         PreloadProbe selected = preloadProbes.remove(key);
-        for (PreloadProbe probe : preloadProbes.values()) {
+        for (Map.Entry<String, PreloadProbe> entry : preloadProbes.entrySet()) {
+            PreloadProbe probe = entry.getValue();
+            pendingPreloads.put(entry.getKey(), probe.request);
             probe.future.cancel(true);
             preloadProbeWorker.remove((Runnable) probe.future);
         }
@@ -1166,6 +1294,7 @@ final class OfficialRuntime {
     }
     void close() throws Exception {
         release();
+        drainPreloads();
         // Unconfirmed native ownership is reclaimed by the existing failed-close process barrier.
         if ((preloads != null && preloads.isBroken())
                 || (foregroundPreloads != null && foregroundPreloads.isBroken()))
@@ -1197,6 +1326,7 @@ final class OfficialRuntime {
     }
 
     void open(Bundle request, Surface surface) throws Exception {
+        syncPreloadScope(request);
         stage("validate");
         String source = request.getString("source"), audio = request.getString("audio");
         if (source == null
@@ -1232,6 +1362,8 @@ final class OfficialRuntime {
             speed = rate;
             volume = gain;
             startPosition = position;
+            playbackBuffered = 0;
+            playbackBuffering = true;
             wantedPlaying = request.getBoolean("play", false);
             openRequest = new Bundle(request);
             outputSurface = surface;
@@ -1283,9 +1415,8 @@ final class OfficialRuntime {
                 invoke(player, "setAudioOnly", audioOnly);
                 invoke(player, "setVolume", volume);
                 speed(speed);
+                drainPreloads();
                 NativeMedia cached = preloads == null ? null : preloads.peek(cacheKey);
-                if (cached == null && preloads != null)
-                    preloads.discardExcept(null);
                 DashSource[] tracks = null;
                 if (cached == null && pendingProbe != null) {
                     stage("dash_probe");
@@ -1310,13 +1441,13 @@ final class OfficialRuntime {
                     awaitingPreloader = preloader;
                     boolean taken =
                             preloads.take(cacheKey, ready -> consumePreload(ready, token, request));
-                    preloads.discardExcept(cacheKey);
                     if (taken)
                         return;
                     awaitingPreload = 0;
                     awaitingPreloader = null;
                 }
-                useItem(nativeItem(media.asset, 0), token, request);
+                useItem(nativeItem(media.asset, request.getLong("position", 0), request), token,
+                        request);
             } catch (Exception | LinkageError error) {
                 try {
                     release();
@@ -1333,6 +1464,8 @@ final class OfficialRuntime {
         }
     }
     private void consumePreload(NativeMedia media, long token, Bundle request) {
+        media.preloadComplete = false;
+        storedPreloads.remove(media.preloadKey);
         if (token != generation || player == null) {
             try {
                 releaseItem(media.item);
@@ -1401,7 +1534,7 @@ final class OfficialRuntime {
                 return;
             }
             if (media.item == null)
-                media.item = nativeItem(media.asset, 0);
+                media.item = nativeItem(media.asset, request.getLong("position", 0), request);
             media.preloadTarget = 1;
             if (item == media.item)
                 item = null;
@@ -1417,9 +1550,6 @@ final class OfficialRuntime {
                 : queue.takeReady(key, ready -> consumePreload(ready, token, request));
         if (!taken)
             throw new IOException("Native metadata handoff unavailable");
-        // Detach shares the native queue with potentially slow closes of unused candidates.
-        if (cached)
-            preloads.discardExcept(key);
     }
     private void configureOutput(boolean hdr) throws Exception {
         Bundle request = openRequest;
@@ -1732,6 +1862,8 @@ final class OfficialRuntime {
             b.putBoolean("automaticVideo", automaticVideoActive);
             Object monitor = invoke(player, "getPlayerMonitor");
             long buffered = (Long) invoke(monitor, "getPacketQueueCacheDurationMs", 1);
+            playbackBuffered = buffered;
+            drainPreloads();
             long duration = b.getLong("duration"), position = b.getLong("position");
             b.putInt("bufferedPercent",
                     duration > 0 ? (int) Math.max(0,
@@ -1965,8 +2097,8 @@ final class OfficialRuntime {
         capturePending = false;
         ++generation;
         if (awaitingPreload != 0) {
-            if (preloads != null)
-                preloads.discardExcept(null);
+            if (preloads != null && awaitingPreloader == preloader && openRequest != null)
+                preloads.discard(preloadKey(openRequest));
             if (foregroundPreloads != null)
                 foregroundPreloads.discardExcept(null);
         }

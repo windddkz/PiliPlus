@@ -121,6 +121,7 @@ for name, inputs, libs in [
             "graph_adapter.c",
             "graph_sret.S",
             "media_index.c",
+            "media_cache.c",
             "media_metadata.c",
             "first_seek.c",
             "media_dash.c",

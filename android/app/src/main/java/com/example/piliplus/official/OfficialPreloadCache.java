@@ -39,6 +39,7 @@ final class OfficialPreloadCache<T> {
     private final Scheduler scheduler;
     private final LongSupplier now;
     private final int capacity;
+    private final long lifetime;
     private final Map<Long, Entry> entries = new LinkedHashMap<>();
     private long serial;
     private boolean broken;
@@ -47,18 +48,40 @@ final class OfficialPreloadCache<T> {
         this(backend, scheduler, now, 3);
     }
     OfficialPreloadCache(Backend<T> backend, Scheduler scheduler, LongSupplier now, int capacity) {
-        if (capacity < 1 || capacity > 3)
+        this(backend, scheduler, now, capacity, 30000);
+    }
+    OfficialPreloadCache(Backend<T> backend, Scheduler scheduler, LongSupplier now, int capacity,
+            long lifetime) {
+        if (capacity < 1 || capacity > 8 || lifetime <= 0)
             throw new IllegalArgumentException("Invalid preload capacity");
         this.backend = backend;
         this.scheduler = scheduler;
         this.now = now;
         this.capacity = capacity;
+        this.lifetime = lifetime;
     }
     boolean isBroken() {
         return broken;
     }
     int size() {
         return entries.size();
+    }
+    int preparing() {
+        int count = 0;
+        for (Entry entry : entries.values())
+            if (entry.state == State.ADDING)
+                count++;
+        return count;
+    }
+    T ready(long task) {
+        Entry entry = entries.get(task);
+        return entry != null && entry.state == State.READY ? entry.item : null;
+    }
+    boolean ready(String key) {
+        for (Entry entry : entries.values())
+            if (entry.key.equals(key) && entry.state == State.READY)
+                return true;
+        return false;
     }
     void makeRoom() {
         if (broken)
@@ -70,7 +93,9 @@ final class OfficialPreloadCache<T> {
                 return;
             if (entry.consumer == null
                     && (entry.state == State.ADDING || entry.state == State.READY)
-                    && (oldest == null || entry.renewed < oldest.renewed))
+                    && (oldest == null
+                            || (entry.state == State.READY && oldest.state != State.READY)
+                            || (entry.state == oldest.state && entry.renewed < oldest.renewed)))
                 oldest = entry;
         }
         if (oldest != null)
@@ -89,7 +114,7 @@ final class OfficialPreloadCache<T> {
         for (Entry entry : entries.values()) {
             if (entry.key.equals(key) && entry.consumer == null
                     && (entry.state == State.ADDING || entry.state == State.READY)
-                    && now.getAsLong() - entry.renewed < 30000)
+                    && now.getAsLong() - entry.renewed < lifetime)
                 return entry.item;
         }
         return null;
@@ -100,7 +125,7 @@ final class OfficialPreloadCache<T> {
         for (Entry entry : entries.values()) {
             if (entry.key.equals(key) && entry.consumer == null
                     && (entry.state == State.ADDING || entry.state == State.READY)
-                    && now.getAsLong() - entry.renewed < 30000) {
+                    && now.getAsLong() - entry.renewed < lifetime) {
                 entry.renewed = now.getAsLong();
                 return true;
             }
@@ -144,7 +169,7 @@ final class OfficialPreloadCache<T> {
             fail(error);
             return false;
         }
-        expire(entry, 30000);
+        expire(entry, lifetime);
         return true;
     }
 
@@ -153,7 +178,7 @@ final class OfficialPreloadCache<T> {
             if (entries.get(entry.task) != entry || entry.consumer != null
                     || (entry.state != State.ADDING && entry.state != State.READY))
                 return;
-            long remaining = 30000 - (now.getAsLong() - entry.renewed);
+            long remaining = lifetime - (now.getAsLong() - entry.renewed);
             if (remaining > 0)
                 expire(entry, remaining);
             else
@@ -176,7 +201,7 @@ final class OfficialPreloadCache<T> {
             if (entry.consumer != null)
                 return false;
             if ((entry.state != State.ADDING && entry.state != State.READY)
-                    || now.getAsLong() - entry.renewed >= 30000) {
+                    || now.getAsLong() - entry.renewed >= lifetime) {
                 if (entry.state == State.ADDING || entry.state == State.READY)
                     remove(entry);
                 continue;
