@@ -41,6 +41,17 @@ final class OfficialPreloadCache<T> {
     }
     boolean isBroken() { return broken; }
     int size() { return entries.size(); }
+    void makeRoom() {
+        if (broken) return;
+        Entry oldest=null;
+        for (Entry entry : entries.values()) {
+            // One outstanding removal is enough; its acknowledgement will free the slot.
+            if (entry.state == State.REMOVING) return;
+            if (entry.consumer == null && (entry.state == State.ADDING || entry.state == State.READY) &&
+                    (oldest == null || entry.renewed < oldest.renewed)) oldest=entry;
+        }
+        if (oldest != null) remove(oldest);
+    }
     void discardExcept(String key) {
         for (Entry entry : entries.values()) {
             if (!entry.key.equals(key) && (entry.state == State.ADDING || entry.state == State.READY)) remove(entry);
@@ -82,9 +93,7 @@ final class OfficialPreloadCache<T> {
             }
         }
         if (entries.size() >= 3) {
-            for (Entry entry : entries.values()) {
-                if (entry.state == State.ADDING || entry.state == State.READY) { remove(entry); break; }
-            }
+            makeRoom();
             // Pending removals still own native handles and count against the bound.
             backend.release(item); return false;
         }
@@ -118,7 +127,7 @@ final class OfficialPreloadCache<T> {
             if (entry.consumer != null) return false;
             if ((entry.state != State.ADDING && entry.state != State.READY) || now.getAsLong()-entry.renewed >= 30000) {
                 if (entry.state == State.ADDING || entry.state == State.READY) remove(entry);
-                return false;
+                continue;
             }
             entry.consumer=consumer;
             if (waitReady && entry.state == State.ADDING) {

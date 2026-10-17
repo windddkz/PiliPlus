@@ -164,6 +164,40 @@ public final class OfficialPreloadCacheTest {
             f.now=30000;check(c.peek("a").equals("new"));
             check(f.calls.contains("release:old") && !f.calls.contains("release:new"));
         }
-        System.out.println("16 ownership scenarios passed");
+        {
+            Fake f=new Fake();OfficialPreloadCache<String> c=f.cache();
+            c.add("a","a");f.now=1;c.add("b","b");f.now=2;c.add("c","c");
+            f.now=3;check(c.retain("a"));c.makeRoom();long removal=f.request,task=f.task;
+            check(f.calls.contains("remove:b") && !f.calls.contains("remove:a") && c.size()==3);
+            c.makeRoom();check(!f.calls.contains("remove:c"));
+            c.event(removal+99,task,"REMOVED",0);check(c.size()==3);
+            c.event(removal,task,"REMOVED",0);check(c.size()==2 && f.calls.contains("release:b"));
+            check(c.add("d","d") && c.size()==3);
+        }
+        {
+            Fake f=new Fake();OfficialPreloadCache<String> c=f.cache();
+            c.add("a","a");check(c.takeReady("a",i->{}));
+            c.add("b","b");long bt=f.task;check(c.take("b",i->{}));
+            c.add("c","c");c.makeRoom();
+            check(f.calls.contains("remove:c") && !f.calls.contains("interrupt:a") && !f.calls.contains("interrupt:b"));
+            c.event(f.request,f.task,"REMOVED",0);int calls=f.calls.size();
+            c.makeRoom();check(f.calls.size()==calls && c.size()==2);
+            c.event(0,bt,"READY",0);check(c.size()==2);
+        }
+        {
+            Fake f=new Fake();OfficialPreloadCache<String> c=f.cache();
+            c.add("a","a");c.event(f.request,f.task,"ADDED",-22);int calls=f.calls.size();
+            c.makeRoom();check(f.calls.size()==calls && c.isBroken());
+        }
+        {
+            Fake f=new Fake();OfficialPreloadCache<String> c=f.cache();List<String> consumed=new ArrayList<>();
+            c.add("a","old");c.discard("a");long removal=f.request,old=f.task;
+            c.add("a","new");long task=f.task;
+            check(c.takeReady("a",consumed::add));
+            c.event(0,task,"READY",0);long detach=f.request;
+            c.event(removal,old,"REMOVED",0);check(consumed.isEmpty());
+            c.event(detach,task,"DETACHED",0);check(consumed.equals(List.of("new")) && c.size()==0);
+        }
+        System.out.println("20 ownership scenarios passed");
     }
 }

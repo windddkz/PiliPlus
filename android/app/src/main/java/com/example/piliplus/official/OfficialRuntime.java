@@ -35,6 +35,7 @@ final class OfficialRuntime {
     private final ThreadPoolExecutor preloadProbeWorker=new ThreadPoolExecutor(1,1,0L,TimeUnit.MILLISECONDS,
         new ArrayBlockingQueue<>(2),r->new Thread(r,"official-preload-probe"));
     private final Map<String,PreloadProbe> preloadProbes=new HashMap<>();
+    private final Map<String,Bundle> pendingPreloads=new LinkedHashMap<>();
     private long preloadEpoch, awaitingPreload;
     private static final class NativeMedia {
         final Object asset; final boolean hdr, nativeMetadata; Object item; long preloadTarget=2000;
@@ -426,6 +427,7 @@ final class OfficialRuntime {
                             String type=invoke(event,"getType").toString();int error=(Integer)invoke(event,"getError");
                             long request=(Long)invoke(event,"getRequestId"),task=(Long)invoke(event,"getTaskId");
                             preloads.event(request,task,type,error);
+                            drainPreloads();
                             if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.d("PiliPreload",type+" request="+request+" task="+task+" error="+error+" retained="+preloads.size());
                         } catch(Exception error){preloadFailure(error);}
                     });
@@ -446,8 +448,30 @@ final class OfficialRuntime {
         if(player!=null)return;
         ensurePreloader();
         if(preloads.retain(key))return;
-        if(preloads.isBroken() || preloads.size()+preloadProbes.size()>=3 || preloadProbes.containsKey(key))return;
+        if(preloads.isBroken() || preloadProbes.containsKey(key))return;
         Bundle request=new Bundle(data);
+        request.putLong("preloadQueuedAt",SystemClock.elapsedRealtime());
+        pendingPreloads.remove(key);
+        if(pendingPreloads.size()>=3)pendingPreloads.remove(pendingPreloads.keySet().iterator().next());
+        pendingPreloads.put(key,request);
+        drainPreloads();
+    }
+    private void drainPreloads() throws Exception {
+        if(player!=null || preloads.isBroken()){pendingPreloads.clear();return;}
+        while(!pendingPreloads.isEmpty()) {
+            String key=pendingPreloads.keySet().iterator().next();Bundle request=pendingPreloads.get(key);
+            if(SystemClock.elapsedRealtime()-request.getLong("preloadQueuedAt")>=30000 || preloads.retain(key)) {
+                pendingPreloads.remove(key);continue;
+            }
+            if(preloads.size()+preloadProbes.size()>=3){preloads.makeRoom();return;}
+            pendingPreloads.remove(key);
+            startPreload(key,request);
+        }
+    }
+    private void startPreload(String key,Bundle request) throws Exception {
+        String source=request.getString("source"),audio=request.getString("audio");
+        OfficialStream video=streamInfo(request.getBundle("sourceTrack"),source),sound=streamInfo(request.getBundle("audioTrack"),audio);
+        String ua=request.getString("userAgent","PiliPlus"),referer=request.getString("referer","https://www.bilibili.com/");
         if(useNativeMetadata(video,sound)) {
             NativeMedia media=media(request,null);media.item=nativeItem(media.asset,request.getLong("position",0));preloads.add(key,media);
             return;
@@ -462,17 +486,21 @@ final class OfficialRuntime {
                     if(preloadProbes.get(key)!=probe)return;
                     preloadProbes.remove(key);
                     if(probe.epoch!=preloadEpoch || player!=null || preloads.isBroken())return;
-                    try {NativeMedia media=media(request,tracks);media.item=nativeItem(media.asset,request.getLong("position",0));preloads.add(key,media);}
+                    try {NativeMedia media=media(request,tracks);media.item=nativeItem(media.asset,request.getLong("position",0));preloads.add(key,media);drainPreloads();}
                     catch(Exception error){preloadFailure(error);}
                 });
                 return tracks;
             } catch(Exception error){worker.post(()->{
-                if(preloadProbes.get(key)==probe){preloadProbes.remove(key);if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.d("PiliPreload","probe skipped: "+error.getClass().getSimpleName());}
+                if(preloadProbes.get(key)==probe){
+                    preloadProbes.remove(key);if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.d("PiliPreload","probe skipped: "+error.getClass().getSimpleName());
+                    try {drainPreloads();}catch(Exception failure){preloadFailure(failure);}
+                }
             });throw error;}
         });} catch(RejectedExecutionException full){preloadProbes.remove(key);}
     }
     private PreloadProbe takePreloadProbe(String key) {
         ++preloadEpoch;
+        pendingPreloads.clear();
         PreloadProbe selected=preloadProbes.remove(key);
         for(PreloadProbe probe:preloadProbes.values()){
             probe.future.cancel(true);preloadProbeWorker.remove((Runnable)probe.future);

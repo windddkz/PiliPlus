@@ -13,6 +13,7 @@ import 'package:PiliPlus/models/model_rec_video_item.dart';
 import 'package:PiliPlus/pages/home/controller.dart';
 import 'package:PiliPlus/pages/main/controller.dart';
 import 'package:PiliPlus/pages/rcmd/controller.dart';
+import 'package:PiliPlus/pages/rcmd/preload_candidates.dart';
 import 'package:PiliPlus/utils/grid.dart';
 import 'package:PiliPlus/utils/id_utils.dart';
 import 'package:PiliPlus/utils/storage_pref.dart';
@@ -36,25 +37,46 @@ class _RcmdPageState extends State<RcmdPage>
   final controller = Get.put(RcmdController());
   List<dynamic>? _prefetchList;
   Timer? _prefetchTimer;
+  Timer? _scrollPrefetchTimer;
   bool _prefetching = false;
+  bool _prefetchAgain = false;
+  int _prefetchRevision = 0;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    controller.scrollController.addListener(_schedulePrefetch);
     _prefetchTimer = Timer.periodic(
       const Duration(seconds: 10),
       (_) => _retainPrefetch(),
     );
   }
 
+  void _schedulePrefetch() {
+    _prefetchRevision++;
+    _scrollPrefetchTimer?.cancel();
+    _scrollPrefetchTimer = Timer(
+      const Duration(milliseconds: 250),
+      _retainPrefetch,
+    );
+  }
+
   void _retainPrefetch() {
     final items = _prefetchList;
-    if (_prefetching || items == null || !_canPrefetch) return;
+    if (items == null || !_canPrefetch) return;
+    if (_prefetching) {
+      _prefetchAgain = true;
+      return;
+    }
     _prefetching = true;
     unawaited(
       _prefetch(items).catchError((Object _) {}).whenComplete(() {
         _prefetching = false;
+        if (_prefetchAgain) {
+          _prefetchAgain = false;
+          _retainPrefetch();
+        }
       }),
     );
   }
@@ -70,6 +92,8 @@ class _RcmdPageState extends State<RcmdPage>
   @override
   void dispose() {
     _prefetchTimer?.cancel();
+    _scrollPrefetchTimer?.cancel();
+    controller.scrollController.removeListener(_schedulePrefetch);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -77,6 +101,8 @@ class _RcmdPageState extends State<RcmdPage>
   bool get _canPrefetch {
     if (!mounted ||
         !VideoHttp.prefetchEnabled ||
+        !controller.scrollController.hasClients ||
+        controller.scrollController.position.isScrollingNotifier.value ||
         WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed ||
         ModalRoute.of(context)?.isCurrent != true) {
       return false;
@@ -90,12 +116,27 @@ class _RcmdPageState extends State<RcmdPage>
 
   Future<void> _prefetch(List<dynamic> items) async {
     if (!_canPrefetch) return;
+    final revision = _prefetchRevision;
     final network = await Connectivity().checkConnectivity();
-    if (!network.contains(ConnectivityResult.wifi)) return;
-    // shortcut: First three feed entries; switch selection to visible rows in the next coverage change.
+    if (!network.contains(ConnectivityResult.wifi) || !_canPrefetch) return;
+    final layout = gridDelegate.layoutCache;
+    if (layout == null) return;
+    final position = controller.scrollController.position;
     var count = 0;
-    for (final item in items) {
-      if (!_canPrefetch || !identical(items, _prefetchList)) return;
+    for (final index in visibleFeedIndices(
+      layout,
+      position.pixels - Style.cardSpace,
+      position.viewportDimension,
+      items.length,
+      controller.lastRefreshAt,
+    )) {
+      if (!_canPrefetch ||
+          revision != _prefetchRevision ||
+          !identical(items, _prefetchList) ||
+          index >= items.length) {
+        return;
+      }
+      final item = items[index];
       if (item is! BaseRcmdVideoItemModel ||
           item.goto != 'av' ||
           item.cid == null ||
@@ -152,12 +193,14 @@ class _RcmdPageState extends State<RcmdPage>
     ColorScheme colorScheme,
     LoadingState<List<dynamic>?> loadingState,
   ) {
-    if (loadingState case Success(:final response?)
-        when !identical(response, _prefetchList)) {
+    if (loadingState case Success(:final response?)) {
       _prefetchList = response;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _retainPrefetch();
+        if (mounted) _schedulePrefetch();
       });
+    } else {
+      _prefetchList = null;
+      _prefetchRevision++;
     }
     return switch (loadingState) {
       Loading() => _buildSkeleton,
