@@ -1,0 +1,13 @@
+.text
+.global graph_make_frame
+.type graph_make_frame,%function
+graph_make_frame:
+    // Original C++ strong-pointer result uses x8, unlike a C pointer return.
+    mov x8, x0
+    mov x0, x1
+    mov x1, x2
+    mov x2, x3
+    mov x3, x4
+    br x5
+.size graph_make_frame, .-graph_make_frame
+.section .note.GNU-stack,"",%progbits
