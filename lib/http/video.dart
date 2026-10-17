@@ -114,11 +114,16 @@ abstract final class VideoHttp {
   ) async {
     try {
       if (!prefetchEnabled || !identical(account, Accounts.video)) return;
+      if (Pref.officialCodecDefault() &&
+          OfficialPlayer.preferredVideoCodecs == null) {
+        await OfficialPlayer.warmUpWhenIdle();
+      }
+      if (!prefetchEnabled || !identical(account, Accounts.video)) return;
       final selected = DashSelection.select(
         response,
         videoQuality: Pref.defaultVideoQa,
         audioQuality: Pref.defaultAudioQa,
-        preferredCodecs: Pref.preferCodecs,
+        preferredCodecs: Pref.playbackCodecs(),
       );
       final audio = selected.audio;
       if (audio == null) return;

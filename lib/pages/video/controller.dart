@@ -284,6 +284,7 @@ class VideoDetailController extends GetxController
 
   // 预设的解码格式
   late List<VideoDecodeFormatType> preferCodecs = Pref.preferCodecs;
+  bool _codecCellular = false;
 
   bool get showReply => isFileSource
       ? false
@@ -1096,13 +1097,13 @@ class VideoDetailController extends GetxController
     }
     if (isQuerying && !fromReset) return;
     // Optional warm-up must not fail the independent URL request.
-    unawaited(
-      plPlayerController.warmUpOfficialRuntime().catchError((Object _) {}),
+    final warmup = plPlayerController.warmUpOfficialRuntime().catchError(
+      (Object _) {},
     );
     final request = ++_videoUrlRequest;
     isQuerying = true;
     try {
-      await _queryVideoUrl(fromReset, autoFullScreenFlag, request);
+      await _queryVideoUrl(fromReset, autoFullScreenFlag, request, warmup);
     } finally {
       if (_isCurrentVideoUrl(request)) isQuerying = false;
     }
@@ -1113,6 +1114,7 @@ class VideoDetailController extends GetxController
     bool fromReset,
     bool autoFullScreenFlag,
     int request,
+    Future<void> warmup,
   ) async {
     if (plPlayerController.enableSponsorBlock && isBlock && !fromReset) {
       querySponsorBlock(bvid: bvid, cid: cid.value);
@@ -1130,7 +1132,7 @@ class VideoDetailController extends GetxController
         ..cacheAutomaticVideo = isWiFi
             ? Pref.officialAutoVideo
             : Pref.officialAutoVideoCellular;
-      preferCodecs = isWiFi ? Pref.preferCodecs : Pref.preferCodecsCellular;
+      _codecCellular = !isWiFi;
     }
 
     final prefetched =
@@ -1155,7 +1157,12 @@ class VideoDetailController extends GetxController
     if (result case Success(:final response)) {
       // Keep all response mutations local until this request is still current.
       if (response.dash != null) await _supplementVideoQualities(response);
+      if (response.dash != null &&
+          Pref.officialCodecDefault(cellular: _codecCellular)) {
+        await warmup;
+      }
       if (!_isCurrentVideoUrl(request)) return;
+      preferCodecs = Pref.playbackCodecs(cellular: _codecCellular);
       data = response;
 
       languages.value = data.language?.items;

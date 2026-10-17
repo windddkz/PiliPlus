@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:PiliPlus/models/common/video/video_decode_type.dart';
+
 import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
 import 'package:PiliPlus/plugin/pl_player/official_player.dart';
 import 'package:flutter/services.dart';
@@ -117,6 +119,83 @@ void main() {
     return player;
   }
 
+  test(
+    'warmup retains validated device codec order across idle disposal',
+    () async {
+      messenger.setMockMethodCallHandler(commands, (call) async {
+        calls.add(call);
+        return switch (call.method) {
+          'availability' => {'available': true},
+          'create' => {'session': 7},
+          'warmUp' => {
+            'videoCodecs': ['AV1', 'HEVC', 'AVC'],
+          },
+          _ => null,
+        };
+      });
+      await OfficialPlayer.warmUpWhenIdle();
+      expect(OfficialPlayer.preferredVideoCodecs, [
+        VideoDecodeFormatType.AV1,
+        VideoDecodeFormatType.HEVC,
+        VideoDecodeFormatType.AVC,
+      ]);
+      expect(
+        () => OfficialPlayer.preferredVideoCodecs!.clear(),
+        throwsUnsupportedError,
+      );
+      expect(calls.last.method, 'dispose');
+    },
+  );
+  test(
+    'missing or malformed capability reply does not replace a valid cache',
+    () async {
+      final player = await create();
+      addTearDown(player.dispose);
+      messenger.setMockMethodCallHandler(
+        commands,
+        (call) async => call.method == 'warmUp'
+            ? {
+                'videoCodecs': ['HEVC', 'AVC'],
+              }
+            : null,
+      );
+      await player.warmUp();
+      final previous = OfficialPlayer.preferredVideoCodecs;
+      for (final value in [
+        null,
+        [],
+        ['AV1', 'AV1'],
+        ['unknown'],
+        [7],
+        'AVC',
+      ]) {
+        messenger.setMockMethodCallHandler(
+          commands,
+          (call) async =>
+              call.method == 'warmUp' ? {'videoCodecs': value} : null,
+        );
+        await player.warmUp();
+        expect(OfficialPlayer.preferredVideoCodecs, same(previous));
+      }
+    },
+  );
+  test('disposed session cannot overwrite device codec capabilities', () async {
+    final player = await create();
+    final previous = OfficialPlayer.preferredVideoCodecs;
+    final reply = Completer<Map<String, Object>>();
+    messenger.setMockMethodCallHandler(
+      commands,
+      (call) async => call.method == 'warmUp' ? reply.future : null,
+    );
+    final pending = player.warmUp();
+    await Future<void>.delayed(Duration.zero);
+    await player.dispose();
+    reply.complete({
+      'videoCodecs': ['AVC'],
+    });
+    await pending;
+    expect(OfficialPlayer.preferredVideoCodecs, same(previous));
+  });
   test(
     'quality command waits for its terminal event and serializes requests',
     () async {

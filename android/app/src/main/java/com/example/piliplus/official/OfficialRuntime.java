@@ -255,6 +255,24 @@ final class OfficialRuntime {
             emit("runtime_ready");
         } catch(Exception | LinkageError error) {loader=null;throw error;}
     }
+    private java.util.ArrayList<String> preferredVideoCodecs;
+    private boolean queriedVideoCodecs;
+    java.util.ArrayList<String> preferredVideoCodecs() {
+        if(queriedVideoCodecs)return preferredVideoCodecs;
+        queriedVideoCodecs=true;
+        try {
+            Class<?> helper=cls("tv.danmaku.ijk.media.player.IjkCodecHelper");
+            java.util.ArrayList<String> codecs=new java.util.ArrayList<>();
+            if(Boolean.TRUE.equals(helper.getMethod("isAv1SupportInternal").invoke(null)))codecs.add("AV1");
+            String hevc=(String)helper.getMethod("getBestCodecNameEnter",String.class).invoke(null,"video/hevc");
+            if(hevc!=null&&!hevc.isEmpty())codecs.add("HEVC");
+            codecs.add("AVC");
+            preferredVideoCodecs=codecs;
+        } catch(Exception | LinkageError error) {
+            android.util.Log.w("PiliCodecCapability","Official capability query unavailable");
+        }
+        return preferredVideoCodecs;
+    }
     private Class<?> cls(String name) throws Exception {return loader.loadClass(name);}
     private static Class<?> boxed(Class<?> t) {
         if(t==int.class)return Integer.class;if(t==long.class)return Long.class;if(t==float.class)return Float.class;

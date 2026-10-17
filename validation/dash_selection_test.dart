@@ -56,6 +56,32 @@ void main() {
     preferredCodecs: codecs,
   );
   test(
+    'official ordinary codec order keeps requested quality and audio identity',
+    () {
+      final selected = select(
+        codecs: [
+          VideoDecodeFormatType.AV1,
+          VideoDecodeFormatType.HEVC,
+          VideoDecodeFormatType.AVC,
+        ],
+      );
+      expect(selected.video, same(resource.dash!.video![3]));
+      expect(selected.audio, same(resource.dash!.audio!.first));
+      // Prefer the requested quality's HEVC over a lower quality's AV1.
+      expect(
+        select(
+          qa: 120,
+          codecs: [VideoDecodeFormatType.AV1, VideoDecodeFormatType.HEVC],
+        ).video,
+        same(resource.dash!.video!.first),
+      );
+      expect(
+        select(codecs: [VideoDecodeFormatType.AVC]).video,
+        same(resource.dash!.video![1]),
+      );
+    },
+  );
+  test(
     'initial selection preserves requested HiRes and actual HEVC object',
     () {
       final selection = select();

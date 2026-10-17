@@ -127,15 +127,17 @@ List<SettingsModel> get videoSettings => [
   NormalModel(
     title: '首选解码格式',
     leading: const Icon(Icons.movie_creation_outlined),
-    getSubtitle: () =>
-        '首选解码格式：${(Pref.preferCodecs.map((i) => i.name).join(","))}，请根据设备支持情况与需求调整',
+    getSubtitle: () => Pref.officialCodecDefault()
+        ? '自动按设备解码能力选择；可手动指定顺序'
+        : '首选解码格式：${(Pref.playbackCodecs().map((i) => i.name).join(","))}，请根据设备支持情况与需求调整',
     onTap: _showCodecsDialog,
   ),
   NormalModel(
     title: '蜂窝网络首选解码格式',
     leading: const Icon(Icons.movie_creation_outlined),
-    getSubtitle: () =>
-        '首选解码格式：${(Pref.preferCodecsCellular.map((i) => i.name).join(","))}，请根据设备支持情况与需求调整',
+    getSubtitle: () => Pref.officialCodecDefault(cellular: true)
+        ? '自动按设备解码能力选择；可手动指定顺序'
+        : '首选解码格式：${(Pref.playbackCodecs(cellular: true).map((i) => i.name).join(","))}，请根据设备支持情况与需求调整',
     onTap: _showCellularCodecsDialog,
   ),
   if (kDebugMode || Platform.isAndroid)
@@ -373,7 +375,7 @@ Future<void> _showCodecsDialog(
     context: context,
     builder: (context) => OrderedMultiSelectDialog<VideoDecodeFormatType>(
       title: '首选解码格式',
-      initValues: Pref.preferCodecs,
+      initValues: Pref.playbackCodecs(),
       values: {for (final e in VideoDecodeFormatType.values) e: e.name},
     ),
   );
@@ -394,7 +396,7 @@ Future<void> _showCellularCodecsDialog(
     context: context,
     builder: (context) => OrderedMultiSelectDialog<VideoDecodeFormatType>(
       title: '蜂窝网络首选解码格式',
-      initValues: Pref.preferCodecsCellular,
+      initValues: Pref.playbackCodecs(cellular: true),
       values: {for (final e in VideoDecodeFormatType.values) e: e.name},
     ),
   );

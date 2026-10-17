@@ -380,7 +380,8 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                 else { terminationReason="command_failed_"+operation.op; terminate(); }
             } else {
                 if (operation.success != null) operation.success.run();
-                if (operation.result != null) operation.result.success(null);
+                if (operation.result != null) operation.result.success(operation.op.equals("warmUp")
+                    ? values("videoCodecs",data.getStringArrayList("videoCodecs")) : null);
             }
         } else if (message.what == OfficialPlaybackService.EVENT) {
             if ("preparation_stage".equals(data.getString("event"))) lastStage=data.getString("stage","unknown");

@@ -33,6 +33,7 @@ import 'package:PiliPlus/plugin/pl_player/models/bottom_progress_behavior.dart';
 import 'package:PiliPlus/plugin/pl_player/models/fullscreen_mode.dart';
 import 'package:PiliPlus/plugin/pl_player/models/hwdec_type.dart';
 import 'package:PiliPlus/plugin/pl_player/models/play_repeat.dart';
+import 'package:PiliPlus/plugin/pl_player/official_player.dart';
 import 'package:PiliPlus/utils/device_utils.dart';
 import 'package:PiliPlus/utils/extension/iterable_ext.dart';
 import 'package:PiliPlus/utils/global_data.dart';
@@ -272,6 +273,21 @@ abstract final class Pref {
     SettingBoxKey.hardwareDecoding,
     defaultValue: HwDecType.kHwdec,
   );
+
+  static bool officialCodecDefault({bool cellular = false}) =>
+      Platform.isAndroid &&
+      officialAudioBackend &&
+      enableHA &&
+      !(cellular && _setting.get(SettingBoxKey.preferCodecsCellular) is List) &&
+      _setting.get(SettingBoxKey.preferCodecs) is! List;
+
+  static List<VideoDecodeFormatType> playbackCodecs({bool cellular = false}) {
+    if (officialCodecDefault(cellular: cellular)) {
+      final codecs = OfficialPlayer.preferredVideoCodecs;
+      if (codecs != null) return codecs;
+    }
+    return cellular ? preferCodecsCellular : preferCodecs;
+  }
 
   static String get videoSync =>
       _setting.get(SettingBoxKey.videoSync, defaultValue: 'display-resample');

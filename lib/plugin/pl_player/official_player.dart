@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:PiliPlus/models/common/video/video_decode_type.dart';
 import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -266,7 +267,33 @@ class OfficialPlayer extends PlatformPlayer {
     }
   }
 
-  Future<void> warmUp() => _send('warmUp');
+  static List<VideoDecodeFormatType>? _preferredVideoCodecs;
+  static List<VideoDecodeFormatType>? get preferredVideoCodecs =>
+      _preferredVideoCodecs;
+
+  Future<void> warmUp() async {
+    if (_disposed || _disposing != null) {
+      throw StateError('Official player is disposed');
+    }
+    final result = await _channel.invokeMapMethod<String, dynamic>(
+      'warmUp',
+      {'session': session},
+    );
+    if (_disposed || _disposing != null || _dead) return;
+    final names = result?['videoCodecs'];
+    if (names is! List ||
+        names.isEmpty ||
+        names.length > VideoDecodeFormatType.values.length ||
+        names.toSet().length != names.length ||
+        !names.every(
+          (name) => VideoDecodeFormatType.values.any((c) => c.name == name),
+        )) {
+      return;
+    }
+    _preferredVideoCodecs = List.unmodifiable(
+      names.map((name) => VideoDecodeFormatType.values.byName(name as String)),
+    );
+  }
 
   Future<void> _send(String method, [Map<String, Object?> data = const {}]) {
     if (_disposed || (_disposing != null && method != 'dispose')) {

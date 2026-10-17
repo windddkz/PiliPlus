@@ -93,6 +93,7 @@ public final class OfficialPlaybackService extends Service {
                 default: throw new IllegalArgumentException("Unknown operation");
             }
             Bundle reply = new Bundle(); reply.putBoolean("ok", true); reply.putInt("pid", android.os.Process.myPid());
+            if(op.equals("warmUp"))reply.putStringArrayList("videoCodecs",runtime.preferredVideoCodecs());
             send(REPLY, message.arg1, reply);
             if (op.equals("close")) {
                 owner.unlinkToDeath(ownerDeath, 0); owner = null; client = null; session = 0;
