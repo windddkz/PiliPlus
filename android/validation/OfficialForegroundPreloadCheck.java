@@ -81,9 +81,10 @@ public final class OfficialForegroundPreloadCheck {
     }
     static OfficialRuntime runtime(Queue background, Queue foreground, List<String> events)
             throws Exception {
-        OfficialRuntime runtime = new OfficialRuntime(null, new Handler(Looper.myLooper()),
+        OfficialRuntime runtime = new OfficialRuntime(OfficialPreloadQueueCheck.context(), new Handler(Looper.myLooper()),
                 event -> events.add(event.getString("event")));
         field("preloads").set(runtime, background.cache);
+        field("preloadsPaused").setBoolean(runtime, true);
         field("preloader").set(runtime, background);
         field("foregroundPreloads").set(runtime, foreground.cache);
         field("foregroundPreloader").set(runtime, foreground);
