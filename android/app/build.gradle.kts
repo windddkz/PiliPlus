@@ -55,9 +55,17 @@ android {
     }
 
     buildFeatures {
+        buildConfig = true
         if (project.hasProperty("dev")) {
             resValues = true
         }
+    }
+
+    defaultConfig {
+        buildConfigField("boolean", "OFFICIAL_AUDIO", providers.gradleProperty("officialAudio").isPresent.toString())
+    }
+    if (providers.gradleProperty("officialAudio").isPresent) {
+        sourceSets["main"].assets.srcDir("src/officialAudio/assets")
     }
 
     buildTypes {
@@ -79,7 +87,7 @@ android {
             )
         }
         debug {
-            applicationIdSuffix = ".debug"
+            applicationIdSuffix = if (providers.gradleProperty("officialAudio").isPresent) ".audio.dev" else ".debug"
         }
     }
 

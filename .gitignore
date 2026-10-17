@@ -149,4 +149,8 @@ pili_release.json
 
 dist
 
+# Local, hash-locked official runtime and owned validation fixtures.
+android/app/src/officialAudio/assets/
+android/app/src/debug/assets/official_fixture/
+
 test*
