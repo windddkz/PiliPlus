@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 
 source = (Path(__file__).resolve().parents[1] / 'android/official_audio/graph_adapter.c').read_text()
-gate = source.split('static SourceResult adapted(void *context){', 1)[1].split('    SourceResult result=original(context);', 1)[0]
+gate = source.split('static SourceResult adapted(void *context){', 1)[1].split('    int64_t previous_pts=', 1)[0]
 gate = gate.replace('((int (*)(void *))(base+0x139d80))(checker)', 'is_buffering(checker)')
 gate = gate.replace('((int (*)(void *))(base+0x139d88))(checker)', 'check(checker)')
 harness = r'''
