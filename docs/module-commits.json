@@ -1208,6 +1208,48 @@
         "lib/http/play_url_prefetch.dart",
         "validation/play_url_prefetch_test.dart"
       ]
+    },
+    {
+      "commit": "cdaa92102828c741f7964de486372a17567c078a",
+      "title": "fix(player): retain preloads when UI becomes hidden",
+      "source_candidate": 338,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlaybackService.java",
+        "android/validation/OfficialMemoryTrimCheck.java"
+      ]
+    },
+    {
+      "commit": "ff520e61167a2168cd47e7313c8967d9828db537",
+      "title": "fix(player): separate cache files from transient preload requests",
+      "source_candidate": 340,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialPreloadQueueCheck.java",
+        "android/validation/OfficialSourceBundleCheck.java",
+        "lib/http/video.dart",
+        "lib/plugin/pl_player/official_player.dart",
+        "validation/official_player_test.dart"
+      ]
+    },
+    {
+      "commit": "9d6a5687525d2450d91677aa4faf17cd6b0073ef",
+      "title": "fix(player): finish lower-priority preload work before rotating slots",
+      "source_candidate": 341,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPreloadCache.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialPreloadCacheTest.java"
+      ]
+    },
+    {
+      "commit": "65d4fe0cd3947e4a2aad6465f17723346f0653dd",
+      "title": "fix(player): handle prepared state when native item callback is lost",
+      "source_candidate": 342,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "android/validation/OfficialPreparedStateCheck.java"
+      ]
     }
   ]
 }
