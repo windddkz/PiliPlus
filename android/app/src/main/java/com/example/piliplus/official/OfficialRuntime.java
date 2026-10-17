@@ -27,6 +27,10 @@ final class OfficialRuntime {
     private Object player, item, externalRenderer, externalOutput;
     private Object preloader;
     private OfficialPreloadCache<NativeMedia> preloads;
+    private OfficialMediaCache mediaCache;
+    private boolean mediaCacheAttempted;
+    private Object cachedItemOption;
+    private final Map<Object,File> itemCaches=new IdentityHashMap<>();
     private final ThreadPoolExecutor preloadProbeWorker=new ThreadPoolExecutor(1,1,0L,TimeUnit.MILLISECONDS,
         new ArrayBlockingQueue<>(2),r->new Thread(r,"official-preload-probe"));
     private final Map<String,PreloadProbe> preloadProbes=new HashMap<>();
@@ -324,8 +328,49 @@ final class OfficialRuntime {
         Object render=cls("com.bilibili.ijk.player.RenderPath").getField("Direct").get(null);
         Object unit=cls("kotlin.time.DurationUnit").getField("MILLISECONDS").get(null);
         long duration=(Long)invoke(cls("kotlin.time.DurationKt"),"toDuration",position,unit);
-        Object descriptor=construct("com.bilibili.ijk.player.PlayerItem",asset,duration,false,0,null,null,0,0,render,252,null);
-        return construct("com.bilibili.ijk.player.AndroidNativePlayerItem",descriptor);
+        File cache=null;
+        if(asset.getClass().getName().endsWith("$Dash") && "VOD".equals(invoke(asset,"getScheme").toString()) && invoke(asset,"getDrm")==null) {
+            try {
+                if(!mediaCacheAttempted){mediaCacheAttempted=true;mediaCache=new OfficialMediaCache(new File(context.getCacheDir(),"official-media"));}
+                if(mediaCache!=null)cache=mediaCache.acquire(context.getCacheDir().getUsableSpace());
+            } catch(IOException | SecurityException error){android.util.Log.w("PiliMediaCache","cache unavailable: "+error.getClass().getSimpleName());}
+        }
+        try {
+            if(cache!=null) {
+                if(cachedItemOption==null) {
+                    Object defaults=construct("com.bilibili.ijk.player.ItemOption");Object[] values=new Object[35];
+                    for(int i=0;i<values.length;i++)values[i]=invoke(defaults,"component"+(i+1));
+                    values[14]=0;
+                    Map<String,String> custom=new HashMap<>();
+                    for(Map.Entry<?,?> entry:((Map<?,?>)values[34]).entrySet())custom.put((String)entry.getKey(),(String)entry.getValue());
+                    custom.put("cache_max_capacity",Long.toString(OfficialMediaCache.TRACK_BYTES));values[34]=custom;
+                    cachedItemOption=invoke(defaults,"copy",values);
+                    JSONObject encoded=new JSONObject((String)invoke(cachedItemOption,"toJson"));
+                    if(encoded.getInt("cache_file_close")!=0 || encoded.getLong("cache_max_capacity")!=OfficialMediaCache.TRACK_BYTES)throw new IOException("Invalid cache options");
+                }
+                Map<String,String> options=new HashMap<>();
+                for(Map.Entry<?,?> entry:((Map<?,?>)invoke(asset,"getOption")).entrySet())options.put((String)entry.getKey(),(String)entry.getValue());
+                options.put("cache_dir",cache.getPath());
+                asset=construct("com.bilibili.ijk.media.MediaAsset$Dash",invoke(asset,"getCurAudioQn"),invoke(asset,"getCurVideoQn"),
+                    invoke(asset,"getVideoStreamList"),invoke(asset,"getAudioStreamList"),invoke(asset,"getScheme"),options,null);
+            }
+            Object descriptor=construct("com.bilibili.ijk.player.PlayerItem",asset,duration,false,0,null,cache==null?null:cachedItemOption,0,0,render,cache==null?252:220,null);
+            Object created=construct("com.bilibili.ijk.player.AndroidNativePlayerItem",descriptor);
+            if(cache!=null){itemCaches.put(created,cache);android.util.Log.i("PiliMediaCache","allocated retained="+mediaCache.retained());}
+            return created;
+        } catch(Exception | LinkageError error) {
+            if(cache!=null)try{mediaCache.release(cache);}catch(IOException cleanup){error.addSuppressed(cleanup);}
+            throw error;
+        }
+    }
+    private void releaseItem(Object released) throws Exception {
+        // Release only after the player or preloader has acknowledged losing its native ownership.
+        invoke(released,"release");
+        File cache=itemCaches.remove(released);
+        if(cache!=null) {
+            try{mediaCache.release(cache);android.util.Log.i("PiliMediaCache","released retained="+mediaCache.retained());}
+            catch(IOException | SecurityException error){android.util.Log.w("PiliMediaCache","cleanup deferred: "+error.getClass().getSimpleName());}
+        }
     }
     private String preloadKey(Bundle request) throws Exception {
         String token=request.getString("preloadToken");if(token==null)return null;
@@ -361,7 +406,7 @@ final class OfficialRuntime {
                 bridge("interruptPreload",handle);
             }
             public void remove(long request,long task,NativeMedia media) throws Exception {preloadResult("removeTask",request,task,media.item);}
-            public void release(NativeMedia media) throws Exception {invoke(media.item,"release");}
+            public void release(NativeMedia media) throws Exception {releaseItem(media.item);}
             public void failed(Exception error){preloadFailure(error);}
         },(delay,action)->worker.postDelayed(action,delay),SystemClock::elapsedRealtime);
         Object cb=Proxy.newProxyInstance(loader,new Class<?>[]{cls("kotlin.jvm.functions.Function1")},(proxy,method,args)->{
@@ -518,7 +563,7 @@ final class OfficialRuntime {
         }
     }
     private void consumePreload(NativeMedia media,long token,Bundle request) {
-        if(token!=generation || player==null){try{invoke(media.item,"release");}catch(Exception error){preloadFailure(error);}return;}
+        if(token!=generation || player==null){try{releaseItem(media.item);}catch(Exception error){preloadFailure(error);}return;}
         run(token,()->{
             item=media.item;
             if(media.nativeMetadata) {
@@ -778,7 +823,7 @@ final class OfficialRuntime {
         awaitingPreload=0;prepared=false;wantedPlaying=false;awaitingMediaInfo=false;
         if(route!=null){route.stop();route=null;}
         if(player!=null){invoke(player,"release");player=null;}
-        if(item!=null){invoke(item,"release");item=null;}
+        if(item!=null){releaseItem(item);item=null;}
         if(hdrSurface!=null){hdrSurface.close();hdrSurface=null;}
         if(externalRenderer!=null){invoke(externalRenderer,"quitExternalRender");externalRenderer=null;externalOutput=null;}
         if(graphActive){JSONObject result=new JSONObject((String)bridge("finishGraphAdapter"));graphActive=false;
