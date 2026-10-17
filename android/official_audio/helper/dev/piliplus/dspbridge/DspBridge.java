@@ -8,6 +8,7 @@ public final class DspBridge {
     public static native void installFirstSeek();
     public static native void installMediaDash();
     public static native void installMediaSwitch();
+    public static native void installMediaAdaptive();
     public static native int chooseStartup(int origin, int low, int high, int[] ids, long[] rates);
     public static native void installNetworkRead(boolean enabled);
     public static native void installTlsCrypto();

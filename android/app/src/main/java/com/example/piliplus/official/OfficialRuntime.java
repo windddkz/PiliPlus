@@ -266,6 +266,7 @@ final class OfficialRuntime {
             bridge("installFirstSeek");
             bridge("installMediaDash");
             bridge("installMediaSwitch");
+            bridge("installMediaAdaptive");
             boolean networkReadBaseline="profile".equals(com.example.piliplus.BuildConfig.BUILD_TYPE) &&
                 new File(context.getExternalFilesDir(null),"research259-network-baseline").isFile();
             bridge("installNetworkRead",!networkReadBaseline);
