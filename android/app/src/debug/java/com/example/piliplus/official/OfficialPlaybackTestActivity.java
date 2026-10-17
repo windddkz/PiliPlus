@@ -35,7 +35,7 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
     private TextView label;
     private long session = 1;
     private int request, rounds, count;
-    private boolean bound, opened, destroyed;
+    private boolean bound, opened, destroyed, resumeAfterSeek;
     private String sample;
     private final ServiceConnection connection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
@@ -50,7 +50,7 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
         if (!BuildConfig.OFFICIAL_AUDIO) { finish(); return; }
         sample = getIntent().getStringExtra("sample");
         if (sample == null) sample = "stereo-48000-16.flac";
-        if (!Arrays.asList("stereo-44100-16.flac", "stereo-96000-24.flac", "surround-soft.flac", "stereo-48000-16.flac", "dash-muxed.mp4", "frame-id.mp4", "sync-fragmented", "surround-soft.eac3", "surround-quiet.eac3", "loudness-stereo.m4a", "sync-loudness").contains(sample))
+        if (!Arrays.asList("stereo-44100-16.flac", "stereo-96000-24.flac", "surround-soft.flac", "stereo-48000-16.flac", "dash-muxed.mp4", "frame-id.mp4", "sync-fragmented", "surround-soft.eac3", "surround-quiet.eac3", "loudness-stereo.m4a", "sync-loudness", "he-aac-v2-48000.m4a", "he-aac-v2-44100.m4a", "he-aac-v2-48000-implicit.aac").contains(sample))
             throw new IllegalArgumentException("Owned fixtures only");
         rounds = getIntent().getBooleanExtra("cycles", false) ? 5 : 0;
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -123,6 +123,11 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
     private void acceptEvent(Bundle data) {
         String event=data.getString("event","unknown");record(event,data);
         if(event.equals("completed"))ui.postDelayed(()->{saveTextureTrace(true);if(getIntent().getBooleanExtra("videoTrace",false))send("close",new Bundle(),()->record("probe_released",null));},500);
+        if(event.equals("seek_complete") && resumeAfterSeek){
+            resumeAfterSeek=false;
+            if(data.getBoolean("timedOut")){record("failure_seek_timeout",data);return;}
+            send("play",new Bundle(),()->record("resumed",null));
+        }
         if(event.equals("prepared")){
             send("play",new Bundle(),null);if(rounds>0)cycle();
             if(bridge==null && getIntent().getBooleanExtra("repeatSurfaceAfterStart",false)){
@@ -215,7 +220,7 @@ public final class OfficialPlaybackTestActivity extends Activity implements Surf
         ui.postDelayed(() -> {
             if (token != session) return;
             Bundle seek = new Bundle(); seek.putLong("position", getIntent().getLongExtra("seekTarget", 1000));
-            send("seek", seek, () -> send("play", new Bundle(), () -> record("resumed", null)));
+            resumeAfterSeek=true;send("seek",seek,null);
         }, 3000);
         ui.postDelayed(() -> {
             if (token != session) return;

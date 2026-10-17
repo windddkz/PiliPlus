@@ -72,6 +72,7 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
     private long sessionStarted;
     private String lastStage = "bind", terminationReason;
     private MethodChannel.Result creating;
+    private Pending releasing;
     private IBinder.DeathRecipient death;
 
     private static final class Pending {
@@ -270,6 +271,7 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
             ui.postDelayed(() -> {
                 if (token == session && pending.containsKey(id)) {
                     Pending operation = pending.remove(id);
+                    if(releasing==operation)releasing=null;
                     if (operation.result != null) operation.result.error("stop_unconfirmed", "Cannot confirm native process stopped", null);
                     emit(values("session", token, "event", "error", "error", "stop_unconfirmed"));
                 }
@@ -292,6 +294,11 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                     pending.put(message.arg1, operation); ui.postDelayed(operation.timeout, 3000); terminationReason="command_failed_close"; terminate();
                 } else if (operation.result != null) operation.result.error("native_command_failed", "Official command failed", data.getString("error"));
                 else { terminationReason="command_failed_"+operation.op; terminate(); }
+            } else if (operation.op.equals("close")) {
+                // Rebinding before onUnbind kills the old process can destroy the next session.
+                releasing=operation;pending.put(message.arg1,operation);
+                ui.postDelayed(operation.timeout,3000);
+                if(bound){context.unbindService(connection);bound=false;}
             } else {
                 if (operation.success != null) operation.success.run();
                 if (operation.result != null) operation.result.success(null);
@@ -322,6 +329,13 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
         return result+"/exit_record_unavailable";
     }
     private void died(String reason) {
+        if(releasing!=null && reason.equals("native_process_died")) {
+            Pending operation=releasing;releasing=null;
+            pending.values().remove(operation);ui.removeCallbacks(operation.timeout);
+            if(operation.success!=null)operation.success.run();
+            if(operation.result!=null)operation.result.success(null);
+            return;
+        }
         long token = session;
         String diagnostic=exitDiagnostic();
         cancelWaitingOpen(reason,diagnostic);
@@ -335,7 +349,7 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
     }
     private void cleanup() {
         cancelWaitingOpen("disposed");
-        session = 0;hostView=null;surface=null;surfaceGeneration++;closing=false;
+        releasing=null;session = 0;hostView=null;surface=null;surfaceGeneration++;closing=false;
         for (Pending operation : pending.values()) {
             ui.removeCallbacks(operation.timeout);
             if (operation.result != null) operation.result.error("disposed", "Official player disposed", null);

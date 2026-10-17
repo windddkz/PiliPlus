@@ -17,7 +17,7 @@ public final class OfficialPluginTestActivity extends Activity {
     private final List<Peer> peers=new ArrayList<>();
     private final ComponentName component=new ComponentName("owned.fixture","Playback");
     private OfficialPlayerPlugin plugin;
-    private boolean finished;
+    private boolean finished, deathDelivered;
     private String scenario;
     private int errors,openErrors,oldMessages;
     private final class Peer {
@@ -61,7 +61,13 @@ public final class OfficialPluginTestActivity extends Activity {
             plugin.onMethodCall(new MethodCall(name,args),new MethodChannel.Result(){
                 public void success(Object value){success.accept(value);}
                 public void error(String code,String message,Object details){
-                    if(name.equals("open") && (scenario.equals("command_timeout") || scenario.equals("native_exit"))) {
+                    if(name.equals("dispose")&&scenario.equals("close_stop_timeout")) {
+                        ui.post(()->{try{
+                            if(!code.equals("stop_unconfirmed")||session()==0||errors!=1){finishResult(false,"unconfirmed_stop_state");return;}
+                            ((IBinder.DeathRecipient)field("death")).binderDied();
+                            ui.postDelayed(()->{try{finishResult(session()==0&&errors==2,"late_death_after_stop_timeout");}catch(Exception e){finishResult(false,e.toString());}},100);
+                        }catch(Exception e){finishResult(false,e.toString());}});
+                    } else if(name.equals("open") && (scenario.equals("command_timeout") || scenario.equals("native_exit"))) {
                         String expected=(scenario.equals("command_timeout")?"timeout_open":"unexpected_exit")+"/graph_adapter/exit_record_unavailable";
                         ui.post(()->{try{finishResult(code.equals("native_process_died") && expected.equals(details) && session()==0 && errors==1,"death_classification:"+details);}catch(Exception e){finishResult(false,e.toString());}});
                     } else if(name.equals("open") && ((scenario.equals("cancel_wait") && code.equals("disposed")) || (scenario.equals("surface_timeout") && code.equals("surface_timeout"))))openErrors++;
@@ -74,22 +80,59 @@ public final class OfficialPluginTestActivity extends Activity {
     }
     @Override public void onCreate(Bundle state){
         super.onCreate(state);scenario=getIntent().getStringExtra("scenario");
-        if(!Arrays.asList("stale_disconnect","stale_binding_died","stale_null","stale_connect","current_disconnect","cancel_wait","surface_timeout","audio_without_view","command_timeout","native_exit").contains(scenario)){finish();return;}
+        if("platform_flush".equals(scenario)){platformFlush();return;}
+        if(!Arrays.asList("close_wait","close_stop_timeout","stale_disconnect","stale_binding_died","stale_null","stale_connect","current_disconnect","cancel_wait","surface_timeout","audio_without_view","command_timeout","native_exit").contains(scenario)){finish();return;}
         try{
             plugin=new OfficialPlayerPlugin();
             field("context",new ContextWrapper(this){
                 @Override public boolean bindService(Intent intent,ServiceConnection connection,int flags){bindings.add(connection);peers.add(new Peer());return true;}
-                @Override public void unbindService(ServiceConnection connection){}
+                @Override public void unbindService(ServiceConnection connection){
+                    try {
+                        IBinder.DeathRecipient death=(IBinder.DeathRecipient)field("death");
+                        if(death!=null&&!scenario.equals("close_stop_timeout"))ui.postDelayed(()->{deathDelivered=true;death.binderDied();},100);
+                    }catch(Exception e){finishResult(false,e.toString());}
+                }
             });
             field("sink",new EventChannel.EventSink(){
                 public void success(Object event){if(event instanceof Map && "error".equals(((Map<?,?>)event).get("event")))errors++;}
                 public void error(String code,String message,Object details){errors++;}
                 public void endOfStream(){}
             });
-            ui.postDelayed(()->finishResult(false,"test_timeout"),5000);
+            ui.postDelayed(()->finishResult(false,"test_timeout"),9000);
             call("create",null,this::created);
             bindings.get(0).onServiceConnected(component,peers.get(0).messenger.getBinder());
         }catch(Exception e){finishResult(false,e.toString());}
+    }
+    private void platformFlush(){
+        new Thread(()->{
+            android.media.AudioTrack track=null;
+            try {
+                for(int round=0;round<3;round++){
+                    int size=android.media.AudioTrack.getMinBufferSize(48000,12,2);
+                    if(size<=0)throw new IllegalStateException("Invalid minimum buffer");
+                    track=new android.media.AudioTrack.Builder()
+                        .setAudioAttributes(new android.media.AudioAttributes.Builder().setUsage(1).setContentType(2).setAllowedCapturePolicy(1).build())
+                        .setAudioFormat(new android.media.AudioFormat.Builder().setSampleRate(48000).setChannelMask(12).setEncoding(2).build())
+                        .setBufferSizeInBytes(size).setTransferMode(1).build();
+                    short[] tone=new short[960];
+                    track.play();
+                    for(int block=0;block<200;block++){
+                        for(int i=0;i<480;i++){tone[2*i]=(short)(4000*Math.sin(2*Math.PI*317*(block*480+i)/48000));tone[2*i+1]=(short)(3000*Math.sin(2*Math.PI*733*(block*480+i)/48000));}
+                        if(track.write(tone,0,tone.length)!=tone.length)throw new IOException("Short tone write");
+                    }
+                    track.pause();Thread.sleep(1000);track.flush();
+                    short[] zeros=new short[size/2];
+                    if(track.write(zeros,0,zeros.length)!=zeros.length)throw new IOException("Short prefill");
+                    track.play();
+                    Arrays.fill(tone,(short)0);
+                    for(int block=0;block<300;block++)if(track.write(tone,0,tone.length)!=tone.length)throw new IOException("Short silence write");
+                    track.pause();track.flush();track.release();track=null;
+                    Thread.sleep(500);
+                }
+                ui.post(()->finishResult(true,"platform_pause_flush_play_completed"));
+            }catch(Exception e){ui.post(()->finishResult(false,e.toString()));}
+            finally{if(track!=null)track.release();}
+        },"owned-platform-flush").start();
     }
     private void created(Object raw){
         try{
@@ -111,6 +154,7 @@ public final class OfficialPluginTestActivity extends Activity {
                 return;
             }
             call("dispose",Map.of("session",token),ignored->{
+                if(scenario.equals("close_stop_timeout")){finishResult(false,"unconfirmed_stop_reported_success");return;}
                 oldMessages=peers.get(0).messages;
                 call("create",null,this::createdAgain);
                 switch(scenario){
@@ -124,6 +168,7 @@ public final class OfficialPluginTestActivity extends Activity {
         }catch(Exception e){finishResult(false,e.toString());}
     }
     private void createdAgain(Object ignored){
+        if(scenario.equals("close_wait")&&!deathDelivered){finishResult(false,"dispose_returned_before_death");return;}
         if(scenario.equals("current_disconnect"))bindings.get(1).onServiceDisconnected(component);
         ui.postDelayed(()->{try{boolean dead=scenario.equals("current_disconnect");finishResult(peers.get(0).messages==oldMessages && (dead?session()==0&&errors==1:session()!=0&&errors==0),"session_ownership");}catch(Exception e){finishResult(false,e.toString());}},100);
     }
