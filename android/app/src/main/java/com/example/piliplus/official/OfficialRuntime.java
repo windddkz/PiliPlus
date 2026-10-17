@@ -534,7 +534,13 @@ final class OfficialRuntime {
             }
             worker.post(() -> run(token, () -> {
                 switch (event) {
+                    case "state":
+                        if ((Integer) invoke(args[2], "unbox-impl") != 2)
+                            break;
+                        // Official state notifications survive an item-dependent prepared callback miss.
                     case "prepared":
+                        if (prepared)
+                            break;
                         updateDisplaySize();
                         if (videoPolicy != null) {
                             invoke(item, "updateDashAutoQnRange", videoPolicy.min(),
@@ -1491,6 +1497,7 @@ final class OfficialRuntime {
                 stage("player_create");
                 player = construct("com.bilibili.ijk.player.IJKMediaPlayer");
                 for (Object[] binding : new Object[][] {{"setOnPreparedCallback", 1, "prepared"},
+                             {"setOnStateChangedCallback", 3, "state"},
                              {"setOnCompletionCallback", 1, "completed"},
                              {"setOnErrorCallback", 2, "error"},
                              {"setOnSeekCompleteCallback", 5, "seek_complete"},
