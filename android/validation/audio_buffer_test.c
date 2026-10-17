@@ -24,6 +24,14 @@ int main(void){
     s.current=1000000000;assert(!audio_buffer_water(&s));s.current=170000000;
     s.packets[1].type=1;assert(!audio_buffer_water(&s));s.packets[1].type=0;
     s.frames[1].type=1;assert(!audio_buffer_water(&s));s.frames[1].type=0;
+    AudioBufferState startup=s;
+    startup.packets[0].duration=371504000;startup.frames[0].duration=208971000000;
+    startup.packets[1].count=0;startup.packets[1].duration=0;startup.current=371504000;
+    assert(audio_buffer_water(&startup)==580475000);
+    startup.reason=1004;assert(!audio_buffer_water(&startup));startup.reason=1002;
+    startup.frames[1].count=0;assert(!audio_buffer_water(&startup));startup.frames[1].count=3;
+    startup.frames[1].eof=1;assert(!audio_buffer_water(&startup));startup.frames[1].eof=0;
+    startup.current=600000000;assert(!audio_buffer_water(&startup));
     AudioBufferQueue tmp=s.packets[0];s.packets[0]=s.packets[1];s.packets[1]=tmp;
     tmp=s.frames[0];s.frames[0]=s.frames[1];s.frames[1]=tmp;
     assert(audio_buffer_water(&s)==937997000);

@@ -15,11 +15,13 @@ static int64_t audio_buffer_water(const AudioBufferState *s){
         if(s->packets[i].type==1)a=&s->packets[i];else if(s->packets[i].type==0)v=&s->packets[i];else return 0;
         if(s->frames[i].type==1)f=&s->frames[i];else if(s->frames[i].type==0)vf=&s->frames[i];else return 0;
     }
-    if(!a||!v||!f||!vf||!a->count||!v->count||!f->count||f->eof||a->duration<0||v->duration<0||f->duration<=0||f->duration>5000000000000LL)return 0;
+    if(!a||!v||!f||!vf||!a->count||!f->count||f->eof||a->duration<0||v->duration<0||f->duration<=0||f->duration>5000000000000LL)return 0;
+    // The original reader skips empty packet queues; require decoded video before extending this at startup.
+    if(!v->count&&(s->reason!=1002||!vf->count||vf->eof))return 0;
     // This locked runtime multiplies microsecond frame durations by 1e6 in FrameQueue.
     int64_t decoded_ns=f->duration/1000;
     if(a->duration>INT64_MAX-decoded_ns)return 0;
-    int64_t value=a->duration+decoded_ns;if(v->duration<value)value=v->duration;
+    int64_t value=a->duration+decoded_ns;if(v->count&&v->duration<value)value=v->duration;
     return value>s->current?value:0;
 }
 
