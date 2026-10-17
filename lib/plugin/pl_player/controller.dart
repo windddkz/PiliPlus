@@ -113,6 +113,19 @@ class PlPlayerController
   OfficialPlayer? _warmedOfficial;
   static Future<void>? _pendingOfficialDisposal;
   final backendRevision = 0.obs;
+  final _renderedVideoCid = RxnInt();
+
+  bool showStartupCover(int targetCid) {
+    backendRevision.value;
+    // shortcut: mpv has no per-source first-frame event here; keep its existing UI until that is connected.
+    return Platform.isAndroid &&
+        Pref.officialAudioBackend &&
+        !_forceMpv &&
+        !onlyPlayAudio.value &&
+        dataStatus.value != DataStatus.error &&
+        _renderedVideoCid.value != targetCid;
+  }
+
   String? _officialFallbackReason;
   bool _forceMpv = false;
   Volume? _sourceVolume;
@@ -850,6 +863,7 @@ class PlPlayerController
   }) {
     final revision = ++_sourceRevision;
     if (_playerCount == 0) return Future.value();
+    if (cid != this.cid) _renderedVideoCid.value = null;
     _processing = true;
     // Invalidate focus resume now; never wait for the focus queue from this queue.
     unawaited(audioSessionHandler?.release(this));
@@ -1153,6 +1167,7 @@ class PlPlayerController
     }
 
     if (player is OfficialPlayer) {
+      final sourceCid = cid;
       try {
         await player.openSource(
           dataSource,
@@ -1166,6 +1181,12 @@ class PlPlayerController
           loudnessScenes: volume?.multiSceneArgs,
           userAgent: BrowserUa.pc,
           referer: HttpString.baseUrl,
+          onFirstVideoFrame: () {
+            if (_currentSource(revision) &&
+                identical(_videoPlayerController, player)) {
+              _renderedVideoCid.value = sourceCid;
+            }
+          },
         );
         if (_currentSource(revision) &&
             identical(_videoPlayerController, player) &&
@@ -2127,6 +2148,7 @@ class PlPlayerController
     unawaited(audioSessionHandler?.release(this));
     _playerCount = 0;
     ++_sourceRevision;
+    _renderedVideoCid.value = null;
     _processing = false;
     if (removeSafeArea) {
       showSystemBar();

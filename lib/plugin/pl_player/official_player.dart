@@ -32,6 +32,7 @@ class OfficialPlayer extends PlatformPlayer {
   late StreamSubscription<dynamic> _events;
   int session = 0;
   int _load = 0;
+  void Function()? _onFirstVideoFrame;
   NetworkSource? _networkSource;
   bool _isLive = false;
   bool _audioOnly = false;
@@ -290,6 +291,7 @@ class OfficialPlayer extends PlatformPlayer {
     String loudnessMode = 'off',
     List<num?>? loudnessValues,
     Map<String, String>? loudnessScenes,
+    void Function()? onFirstVideoFrame,
   }) async {
     if (_disposed || _disposing != null) {
       throw StateError('Official player is disposing or disposed');
@@ -306,6 +308,7 @@ class OfficialPlayer extends PlatformPlayer {
       );
     }
     var load = ++_load;
+    _onFirstVideoFrame = audioOnly ? null : onFirstVideoFrame;
     _isLive = isLive;
     final original = source;
     _networkSource = source is NetworkSource ? source : null;
@@ -391,6 +394,7 @@ class OfficialPlayer extends PlatformPlayer {
         original.onRefreshed?.call(original, _networkSource!);
       }
     } catch (error) {
+      _onFirstVideoFrame = null;
       if (isResourceFailure(error) && !_disposed && _disposing == null) {
         resourceUnavailable = true;
         state.buffering = false;
@@ -407,6 +411,11 @@ class OfficialPlayer extends PlatformPlayer {
     if (raw.containsKey('load') && raw['load'] != _load) return;
     final event = Map<String, dynamic>.from(raw);
     switch (event['event']) {
+      case 'first_video_frame':
+        if (_disposing != null || _dead || event['load'] != _load) return;
+        final callback = _onFirstVideoFrame;
+        _onFirstVideoFrame = null;
+        callback?.call();
       case 'resource_refresh':
         final request = event['requestId'];
         if (request is int &&
@@ -425,6 +434,7 @@ class OfficialPlayer extends PlatformPlayer {
           pending.$2.onRefreshed?.call(pending.$2, pending.$3);
         }
       case 'resource_error':
+        _onFirstVideoFrame = null;
         _nativePrepared = false;
         resourceUnavailable = true;
         _refreshRequest = null;
@@ -446,6 +456,7 @@ class OfficialPlayer extends PlatformPlayer {
         state.buffering = false;
         bufferingController.add(false);
       case 'error':
+        _onFirstVideoFrame = null;
         final code = event['error'] as String? ?? 'native_error';
         _nativePrepared = false;
         _cancelSeek(PlatformException(code: code));
@@ -773,6 +784,7 @@ class OfficialPlayer extends PlatformPlayer {
   }
 
   Future<void> _dispose() async {
+    _onFirstVideoFrame = null;
     _cancelSeek(StateError('Playback disposed during seek'));
     if (!_dead) {
       try {

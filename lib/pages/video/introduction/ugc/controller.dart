@@ -525,9 +525,7 @@ class UgcIntroController extends CommonIntroController with ReloadMixin {
         reload = true;
         aiConclusionResult = null;
 
-        if (cover != null && cover.isNotEmpty) {
-          videoDetailCtr.cover.value = cover;
-        }
+        videoDetailCtr.cover.value = cover ?? '';
 
         // 重新请求相关视频
         if (videoDetailCtr.plPlayerController.showRelatedVideo) {

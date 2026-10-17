@@ -269,6 +269,8 @@ final class OfficialRuntime {
                         if(startPosition>0)invoke(player,"seekTo",true,startPosition,5000L);
                         if(wantedPlaying)invoke(player,"start");emit("prepared");heartbeat(token);break;
                     case "completed":wantedPlaying=false;emit("completed");break;
+                    case "first_frame":
+                        if(Integer.valueOf(0).equals(args[0]))emit("first_video_frame");break;
                     case "error":
                         int code=(Integer)args[1];
                         release();
@@ -573,7 +575,8 @@ final class OfficialRuntime {
             stage("player_create");
             player=construct("com.bilibili.ijk.player.IJKMediaPlayer");
             for(Object[] binding:new Object[][]{{"setOnPreparedCallback",1,"prepared"},{"setOnCompletionCallback",1,"completed"},{"setOnErrorCallback",2,"error"},
-                    {"setOnSeekCompleteCallback",5,"seek_complete"},{"setOnBufferingUpdateCallback",2,"buffering"},{"setOnVideoSizeChangedCallback",3,"video_size"}})
+                    {"setOnSeekCompleteCallback",5,"seek_complete"},{"setOnBufferingUpdateCallback",2,"buffering"},{"setOnVideoSizeChangedCallback",3,"video_size"},
+                    {"setOnFirstFrameRenderedCallback",1,"first_frame"}})
                 invoke(player,(String)binding[0],callback((Integer)binding[1],(String)binding[2],token));
             boolean audioOnly=request.getBoolean("audioOnly",false);
             invoke(player,"setAudioOnly",audioOnly);invoke(player,"setVolume",volume);speed(speed);

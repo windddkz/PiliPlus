@@ -1243,13 +1243,14 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
                         !videoDetailController.autoPlay) &&
                     !mountOfficial) ||
                 !hasOutput
-            ? const SizedBox.shrink()
+            ? startupCover(width: width, height: height)
             : PLVideoPlayer(
                 key: ValueKey(controller.backendRevision.value),
                 maxWidth: width,
                 maxHeight: height,
                 plPlayerController: controller,
                 videoDetailController: videoDetailController,
+                startupCover: startupCover(width: width, height: height),
                 introController: introController,
                 headerControl: HeaderControl(
                   key: videoDetailController.headerCtrKey,
@@ -1476,6 +1477,36 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
       ),
     );
   }
+
+  Widget startupCover({required double width, required double height}) =>
+      Obx(() {
+        final controller = videoDetailController;
+        final cid = controller.cid.value;
+        final cover = controller.cover.value;
+        if (!isShowing ||
+            !controller.autoPlay ||
+            cover.isEmpty ||
+            !controller.plPlayerController.showStartupCover(cid)) {
+          return const SizedBox.shrink();
+        }
+        return IgnorePointer(
+          child: ColoredBox(
+            color: Colors.black,
+            child: NetworkImgLayer(
+              key: ValueKey((cid, cover)),
+              src: cover,
+              type: .emote,
+              width: width,
+              height: height,
+              cacheWidth: true,
+              fit: .contain,
+              fadeInDuration: Duration.zero,
+              fadeOutDuration: Duration.zero,
+              getPlaceHolder: () => const SizedBox.shrink(),
+            ),
+          ),
+        );
+      });
 
   Widget videoPlayer({required double width, required double height}) {
     final isFullScreen = this.isFullScreen;
