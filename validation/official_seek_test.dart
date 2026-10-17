@@ -58,51 +58,6 @@ void main() {
     return p;
   }
 
-  test('cover waits for current video frame, once per source, never after disposal', () async {
-    final p = await OfficialPlayer.create((_) => throw StateError('fallback'));
-    var frames = 0;
-    Future<void> start({bool audioOnly = false}) => p.openSource(
-      NetworkSource(
-        videoSource: 'https://example.invalid/video',
-        audioSource: null,
-      ),
-      userAgent: 'test',
-      referer: '',
-      audioOnly: audioOnly,
-      onFirstVideoFrame: () => frames++,
-    );
-    var opening = start();
-    await emit({'event': 'prepared'});
-    await opening;
-    await emit({'event': 'first_audio_frame'});
-    await emit({'event': 'first_video_frame', 'session': 8});
-    await emit({'event': 'first_video_frame', 'load': 0});
-    await emit({'event': 'first_video_frame', 'load': null});
-    expect(frames, 0);
-    await emit({'event': 'first_video_frame'});
-    await emit({'event': 'first_video_frame'});
-    expect(frames, 1);
-    opening = start();
-    await emit({'event': 'first_video_frame'});
-    expect(frames, 1);
-    await emit({'event': 'first_video_frame', 'load': 2});
-    await emit({'event': 'prepared', 'load': 2});
-    await opening;
-    expect(frames, 2);
-    opening = start(audioOnly: true);
-    await emit({'event': 'first_video_frame', 'load': 3});
-    await emit({'event': 'prepared', 'load': 3});
-    await opening;
-    expect(frames, 2);
-    opening = start();
-    await emit({'event': 'prepared', 'load': 4});
-    await opening;
-    final stopping = p.dispose();
-    await emit({'event': 'first_video_frame', 'load': 4});
-    await stopping;
-    expect(frames, 2);
-  });
-
   test('selected stream metadata follows video and audio-only opens', () async {
     final p = await OfficialPlayer.create((_) => throw StateError('fallback'));
     final source = NetworkSource(

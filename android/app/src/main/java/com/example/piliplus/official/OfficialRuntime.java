@@ -572,10 +572,6 @@ final class OfficialRuntime {
                         wantedPlaying = false;
                         emit("completed");
                         break;
-                    case "first_frame":
-                        if (Integer.valueOf(0).equals(args[0]))
-                            emit("first_video_frame");
-                        break;
                     case "error":
                         int code = (Integer) args[1];
                         release();
@@ -1411,7 +1407,6 @@ final class OfficialRuntime {
                              {"setOnSeekCompleteCallback", 5, "seek_complete"},
                              {"setOnBufferingUpdateCallback", 2, "buffering"},
                              {"setOnVideoSizeChangedCallback", 3, "video_size"},
-                             {"setOnFirstFrameRenderedCallback", 1, "first_frame"},
                              {"setOnQnUpdateCallback", 4, "quality"},
                              {"setOnStreamSwitchStateChangedCallback", 6, "video_control"}})
                     invoke(player, (String) binding[0],
