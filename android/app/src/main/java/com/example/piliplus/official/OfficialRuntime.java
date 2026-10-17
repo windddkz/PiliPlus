@@ -3,6 +3,7 @@ package com.example.piliplus.official;
 import android.content.Context;
 import android.os.*;
 import android.view.Surface;
+import android.view.SurfaceControl;
 import dalvik.system.DexClassLoader;
 import org.json.JSONObject;
 import java.io.*;
@@ -24,6 +25,19 @@ final class OfficialRuntime {
     private Object player, item, externalRenderer, externalOutput;
     private OfficialAudioRoute route;
     private Surface outputSurface;
+    private SurfaceControl outputParent;
+    private int windowWidth,windowHeight;
+    private OfficialHdrSurface hdrSurface;
+    void outputWindow(Bundle data) {
+        if(Build.VERSION.SDK_INT<33)return;
+        SurfaceControl next=data.getParcelable("parent");
+        SurfaceControl previous=outputParent;outputParent=next;
+        windowWidth=data.getInt("windowWidth");windowHeight=data.getInt("windowHeight");
+        try {updateHdrSurface();} finally {if(previous!=null)previous.release();}
+    }
+    private void updateHdrSurface() {
+        if(hdrSurface!=null)hdrSurface.update(outputParent,windowWidth,windowHeight,displayWidth,displayHeight,openRequest);
+    }
     private Bundle openRequest;
     private long generation, load;
     private boolean initAttempted, prepared, graphActive, dspActive;
@@ -201,6 +215,7 @@ final class OfficialRuntime {
         int w=(Integer)invoke(media,"getWidth"),h=(Integer)invoke(media,"getHeight");
         // MediaCodec dimensions describe allocation; the page needs the source image dimensions.
         displayWidth=w>0&&h>0?w:width;displayHeight=w>0&&h>0?h:height;
+        updateHdrSurface();
     }
     private Object callback(int arity,String event,long token) throws Exception {
         Class<?> type=cls("kotlin.jvm.functions.Function"+arity);
@@ -272,7 +287,24 @@ final class OfficialRuntime {
                 invoke(player,(String)binding[0],callback((Integer)binding[1],(String)binding[2],token));
             boolean audioOnly=request.getBoolean("audioOnly",false);
             invoke(player,"setAudioOnly",audioOnly);invoke(player,"setVolume",volume);speed(speed);
-            if(!audioOnly&&surface!=null) {
+            Map<String,String> options=new HashMap<>();options.put("user_agent",userAgent);options.put("referer",referer);
+            Object asset;
+            boolean directHdr=false;
+            if(audio!=null&&!audio.isEmpty()) {
+                if(source.startsWith("/")!=audio.startsWith("/"))throw new IllegalArgumentException("Mixed local/network DASH");
+                stage("video_probe");
+                DashSource video=DashSource.probe(source,userAgent,referer);
+                directHdr=video.hdr && Build.VERSION.SDK_INT>=33 && outputParent!=null;
+                stage("audio_probe");
+                DashSource sound=DashSource.probe(audio,userAgent,referer);
+                if(!Arrays.asList("H264","HEVC","AV1").contains(video.codec)||!Arrays.asList("AAC","FLAC","AC3","EAC3").contains(sound.codec))throw new IllegalArgumentException("DASH track types do not match");
+                Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField(source.startsWith("/")?"OFFLINE":"VOD").get(null);
+                asset=construct("com.bilibili.ijk.media.MediaAsset$Dash",30280,80,Collections.singletonList(dashStream(video,0,80)),Collections.singletonList(dashStream(sound,1,30280)),scheme,options,null);
+            } else {
+                Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField("NORMAL").get(null);
+                asset=construct("com.bilibili.ijk.media.MediaAsset$Normal",source,Collections.emptyList(),scheme,options,null);
+            }
+            if(!audioOnly&&surface!=null&&!directHdr) {
                 invoke(cls("tv.danmaku.ijk.media.player.render.core.BiliRenderContext"),"init",context);
                 cls("tv.danmaku.ijk.media.player.render.IjkExternalRenderThread").getField("EXTERNAL_RENDER_TYPE").setInt(null,0);
                 externalRenderer=construct("tv.danmaku.ijk.media.player.render.IjkExternalRenderThread");
@@ -298,21 +330,10 @@ final class OfficialRuntime {
                 if(decoderSurface==null||!decoderSurface.isValid())throw new IOException("Official input surface invalid");
                 invoke(player,"setSurface",decoderSurface);
             }
-            Map<String,String> options=new HashMap<>();options.put("user_agent",userAgent);options.put("referer",referer);
-            Object asset;
-            if(audio!=null&&!audio.isEmpty()) {
-                if(source.startsWith("/")!=audio.startsWith("/"))throw new IllegalArgumentException("Mixed local/network DASH");
-                stage("video_probe");
-                DashSource video=DashSource.probe(source,userAgent,referer);
-                stage("audio_probe");
-                DashSource sound=DashSource.probe(audio,userAgent,referer);
-                if(!Arrays.asList("H264","HEVC","AV1").contains(video.codec)||!Arrays.asList("AAC","FLAC","AC3","EAC3").contains(sound.codec))throw new IllegalArgumentException("DASH track types do not match");
-                Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField(source.startsWith("/")?"OFFLINE":"VOD").get(null);
-                asset=construct("com.bilibili.ijk.media.MediaAsset$Dash",30280,80,Collections.singletonList(dashStream(video,0,80)),Collections.singletonList(dashStream(sound,1,30280)),scheme,options,null);
-            } else {
-                Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField("NORMAL").get(null);
-                asset=construct("com.bilibili.ijk.media.MediaAsset$Normal",source,Collections.emptyList(),scheme,options,null);
+            if(!audioOnly && directHdr) {
+                hdrSurface=new OfficialHdrSurface();updateHdrSurface();invoke(player,"setSurface",hdrSurface.surface);
             }
+            Bundle display=new Bundle();display.putString("event","display_path");display.putBoolean("directHdr",!audioOnly&&directHdr);emit(display);
             stage("prepare");
             Object render=cls("com.bilibili.ijk.player.RenderPath").getField("Direct").get(null);
             Object descriptor=construct("com.bilibili.ijk.player.PlayerItem",asset,0L,false,0,null,null,0,0,render,254,null);
@@ -360,6 +381,7 @@ final class OfficialRuntime {
     }
     void surface(Surface surface) throws Exception {
         outputSurface=surface;
+        if(hdrSurface!=null) {updateHdrSurface();return;}
         if(externalRenderer!=null) {
             if(surface==null)invoke(externalRenderer,"releaseWindowSurface");
             else if(!Boolean.TRUE.equals(invoke(externalRenderer,"createWindowSurface",surface)))throw new IOException("Official output replacement failed");
@@ -381,6 +403,7 @@ final class OfficialRuntime {
         applyDisplayTransform();
     }
     private void applyDisplayTransform() throws Exception {
+        if(hdrSurface!=null){updateHdrSurface();return;}
         if(externalOutput==null)return;
         // Crop in the original renderer instead of allocating a decoder-sized Android window.
         invoke(externalOutput,"translate",Math.round(openRequest.getFloat("offsetX",0)),Math.round(openRequest.getFloat("offsetY",0)));
@@ -412,6 +435,7 @@ final class OfficialRuntime {
         if(route!=null){route.stop();route=null;}
         if(player!=null){invoke(player,"release");player=null;}
         if(item!=null){invoke(item,"release");item=null;}
+        if(hdrSurface!=null){hdrSurface.close();hdrSurface=null;}
         if(externalRenderer!=null){invoke(externalRenderer,"quitExternalRender");externalRenderer=null;externalOutput=null;}
         if(graphActive){JSONObject result=new JSONObject((String)bridge("finishGraphAdapter"));graphActive=false;
             if(com.example.piliplus.BuildConfig.DEBUG && result.optBoolean("video_trace_enabled")) {

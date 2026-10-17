@@ -24,6 +24,14 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
     private Context context;
     private SurfaceView hostView;
     private Surface surface;
+    private Bundle windowData(Surface output) {
+        Bundle data=new Bundle();data.putParcelable("surface",output);
+        if(Build.VERSION.SDK_INT>=33 && output!=null && hostView!=null && hostView.getSurfaceControl().isValid()) {
+            data.putParcelable("parent",hostView.getSurfaceControl());
+            data.putInt("windowWidth",hostView.getWidth());data.putInt("windowHeight",hostView.getHeight());
+        }
+        return data;
+    }
     private int surfaceGeneration;
     private boolean closing;
     private WaitingOpen waitingOpen;
@@ -47,7 +55,7 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
         if(opening==null || opening.attaching || closing || remote==null || surface==null || !surface.isValid())return;
         int generation=surfaceGeneration;
         opening.attaching=true;
-        Bundle output=new Bundle();output.putParcelable("surface",surface);
+        Bundle output=windowData(surface);
         send("surface",output,new MethodChannel.Result(){
             public void success(Object ignored){
                 if(waitingOpen!=opening || session!=opening.token || closing)return;
@@ -121,10 +129,10 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                         surface=holder.getSurface();surfaceGeneration++;
                         emit(values("session",session,"event","platform_surface_ready"));
                         if(waitingOpen!=null)flushWaitingOpen();
-                        else if(remote!=null){Bundle data=new Bundle();data.putParcelable("surface",surface);send("surface",data,null,null);}
+                        else if(remote!=null){send("surface",windowData(surface),null,null);}
                     }
                     public void surfaceChanged(SurfaceHolder holder,int format,int width,int height){
-                        if(owns() && remote!=null)send("resize",new Bundle(),null,null);
+                        if(owns() && remote!=null){Bundle data=windowData(surface);data.remove("surface");send("resize",data,null,null);}
                     }
                     public void surfaceDestroyed(SurfaceHolder holder){
                         if(!owns())return;

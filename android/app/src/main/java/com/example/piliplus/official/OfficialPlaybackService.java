@@ -62,16 +62,16 @@ public final class OfficialPlaybackService extends Service {
             switch (op) {
                 case "create": break;
                 case "open": runtime.open(data, surface); break;
-                case "surface": setSurface(data.getParcelable("surface")); break;
+                case "surface": runtime.outputWindow(data); setSurface(data.getParcelable("surface")); break;
                 case "play": runtime.play(true); break;
                 case "pause": runtime.play(false); break;
                 case "mirror": runtime.mirror(data); break;
                 case "viewport": runtime.viewport(data); break;
-                case "resize": runtime.resize(); break;
+                case "resize": runtime.outputWindow(data); runtime.resize(); break;
                 case "seek": runtime.seek(data.getLong("position", -1)); break;
                 case "speed": runtime.speed(data.getFloat("speed", Float.NaN)); break;
                 case "volume": runtime.volume(data.getFloat("volume", Float.NaN)); break;
-                case "close": runtime.release(); setSurface(null); break;
+                case "close": runtime.release(); runtime.outputWindow(new Bundle()); setSurface(null); break;
                 default: throw new IllegalArgumentException("Unknown operation");
             }
             Bundle reply = new Bundle(); reply.putBoolean("ok", true); reply.putInt("pid", android.os.Process.myPid());
@@ -107,6 +107,7 @@ public final class OfficialPlaybackService extends Service {
     }
     @Override public void onDestroy() {
         if (worker != null) worker.post(() -> { try { runtime.release(); } catch (Exception ignored) { }
+            runtime.outputWindow(new Bundle());
             if (surface != null) surface.release(); thread.quitSafely(); });
         super.onDestroy();
     }

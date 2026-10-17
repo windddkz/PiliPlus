@@ -7,7 +7,8 @@ import java.net.URL;
 final class DashSource {
     final String url, codec;
     final long size;
-    private DashSource(String url, String codec, long size) { this.url = url; this.codec = codec; this.size = size; }
+    final boolean hdr;
+    private DashSource(String url, FragmentIndex.Info info, long size) { this.url = url; this.codec = info.codec; this.hdr = info.hdr; this.size = size; }
 
     static DashSource probe(String source, String userAgent, String referer) throws Exception {
         final int limit = 2 * 1024 * 1024;
@@ -40,8 +41,8 @@ final class DashSource {
             byte[] buffer = new byte[16384]; int count;
             while (bytes.size() < limit && (count = input.read(buffer, 0, Math.min(buffer.length, limit - bytes.size()))) != -1)
                 bytes.write(buffer, 0, count);
-            String codec = FragmentIndex.inspect(bytes.toByteArray(), length);
-            return new DashSource(source, codec, length);
+            FragmentIndex.Info info = FragmentIndex.inspectInfo(bytes.toByteArray(), length);
+            return new DashSource(source, info, length);
         } finally {
             if (input != null) input.close();
             if (connection != null) connection.disconnect();
