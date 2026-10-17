@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:PiliPlus/models/common/video/video_decode_type.dart';
 
@@ -119,6 +121,70 @@ void main() {
     await ready;
     return player;
   }
+
+  test('screenshot reads native image without changing player and removes temporary file', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'official-capture-test',
+    );
+    try {
+      final recorder = ui.PictureRecorder();
+      ui.Canvas(recorder)
+          .drawColor(const ui.Color(0xffff0000), ui.BlendMode.src);
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(3, 2);
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      picture.dispose();
+      final file = File('${directory.path}/frame.png');
+      await file.writeAsBytes(bytes!.buffer.asUint8List());
+      final player = await create();
+      messenger.setMockMethodCallHandler(
+        commands,
+        (call) async => call.method == 'screenshot' ? file.path : null,
+      );
+      final capture = await player.screenshot();
+      expect((capture?.width, capture?.height), (3, 2));
+      expect(await file.exists(), false);
+      capture?.dispose();
+      await player.dispose();
+    } finally {
+      await directory.delete(recursive: true);
+    }
+  });
+
+  test(
+    'screenshot failure is local and a late reply after dispose is discarded',
+    () async {
+      final player = await create();
+      messenger.setMockMethodCallHandler(commands, (call) async {
+        if (call.method == 'screenshot')
+          throw PlatformException(code: 'capture_failed');
+        return null;
+      });
+      expect(await player.screenshot(), null);
+      expect(player.processDead, false);
+      final reply = Completer<String>();
+      messenger.setMockMethodCallHandler(
+        commands,
+        (call) async => call.method == 'screenshot' ? reply.future : null,
+      );
+      final capture = player.screenshot();
+      await Future<void>.delayed(Duration.zero);
+      await player.dispose();
+      final directory = await Directory.systemTemp.createTemp(
+        'official-stale-capture',
+      );
+      try {
+        final file = await File('${directory.path}/frame.png')
+            .writeAsString('stale');
+        reply.complete(file.path);
+        expect(await capture, null);
+        expect(await file.exists(), false);
+      } finally {
+        await directory.delete(recursive: true);
+      }
+    },
+  );
 
   test(
     'plain subtitles stay on official playback and follow seek/disable',

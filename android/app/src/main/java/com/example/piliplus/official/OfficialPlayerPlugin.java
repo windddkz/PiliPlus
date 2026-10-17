@@ -269,6 +269,7 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                 data.putLong("requestId",number(call,"requestId",-1).longValue());
                 data.putInt("quality",(Integer)call.argument("quality"));
                 data.putBoolean("automatic",(Boolean)call.argument("automatic"));break;
+            case "screenshot": data.putLong("load", number(call,"load",-1).longValue()); break;
             case "seek": data.putLong("position", number(call, "position", -1).longValue()); break;
             case "speed": data.putFloat("speed", number(call, "speed", Float.NaN).floatValue()); break;
             case "volume": data.putFloat("volume", number(call, "volume", Float.NaN).floatValue()); break;
@@ -350,6 +351,11 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
         int id = ++request; long token = session;
         Runnable timeout = () -> {
             if (token != session || !pending.containsKey(id)) return;
+            if (op.equals("screenshot")) {
+                Pending capture = pending.remove(id);
+                if (capture.result != null) capture.result.success(null);
+                return;
+            }
             // Termination travels on the service main thread even if the native worker is stuck.
             if (terminationReason == null) terminationReason = "timeout_" + op;
             terminate();
@@ -368,10 +374,19 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
     }
     private boolean receive(Message message) {
         Bundle data = message.getData();
-        if (session == 0 || data.getLong("session") != session) return true;
+        if (session == 0 || data.getLong("session") != session) {
+            String capture = data.getString("screenshot");
+            if (capture != null) new java.io.File(capture).delete();
+            return true;
+        }
         if (message.what == OfficialPlaybackService.REPLY) {
             if (data.getInt("pid",0)>0) nativePid=data.getInt("pid");
-            Pending operation = pending.remove(message.arg1); if (operation == null) return true;
+            Pending operation = pending.remove(message.arg1);
+            if (operation == null) {
+                String capture = data.getString("screenshot");
+                if (capture != null) new java.io.File(capture).delete();
+                return true;
+            }
             ui.removeCallbacks(operation.timeout);
             if (!data.getBoolean("ok")) {
                 if (operation.op.equals("close")) {
@@ -381,7 +396,8 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
             } else {
                 if (operation.success != null) operation.success.run();
                 if (operation.result != null) operation.result.success(operation.op.equals("warmUp")
-                    ? values("videoCodecs",data.getStringArrayList("videoCodecs")) : null);
+                    ? values("videoCodecs",data.getStringArrayList("videoCodecs"))
+                    : operation.op.equals("screenshot") ? data.getString("screenshot") : null);
             }
         } else if (message.what == OfficialPlaybackService.EVENT) {
             if ("preparation_stage".equals(data.getString("event"))) lastStage=data.getString("stage","unknown");

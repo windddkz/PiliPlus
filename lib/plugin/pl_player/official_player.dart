@@ -998,7 +998,45 @@ class OfficialPlayer extends PlatformPlayer {
   }
 
   @override
-  Future<ui.Image?> screenshot() async => (await fallback('视频截图')).screenshot();
+  Future<ui.Image?> screenshot() async {
+    if (_disposed || _disposing != null || _dead) return null;
+    final load = _load;
+    File? file;
+    try {
+      final path = await _channel.invokeMethod<String>('screenshot', {
+        'session': session,
+        'load': load,
+      });
+      if (path == null) return null;
+      file = File(path);
+      if (_disposed || _disposing != null || load != _load) return null;
+      final codec = await ui.instantiateImageCodec(await file.readAsBytes());
+      try {
+        final frame = await codec.getNextFrame();
+        if (_disposed || _disposing != null || load != _load) {
+          frame.image.dispose();
+          return null;
+        }
+        return frame.image;
+      } finally {
+        codec.dispose();
+      }
+    } on PlatformException {
+      return null;
+    } on FileSystemException {
+      return null;
+    } on Exception {
+      return null;
+    } finally {
+      if (file != null) {
+        try {
+          await file.delete();
+        } on FileSystemException {
+          /* Already removed. */
+        }
+      }
+    }
+  }
 
   Future<void> _closeStreams() async {
     await _rateUpdates.close();

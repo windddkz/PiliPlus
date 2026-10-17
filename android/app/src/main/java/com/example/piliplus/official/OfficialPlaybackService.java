@@ -87,6 +87,19 @@ public final class OfficialPlaybackService extends Service {
                 case "resize": runtime.outputWindow(data); runtime.resize(); break;
                 case "videoControl": runtime.videoControl(data); break;
                 case "seek": runtime.seek(data.getLong("position", -1)); break;
+                case "screenshot": {
+                    final long captureSession = session;
+                    final int request = message.arg1;
+                    runtime.screenshot(data.getLong("load", -1), path -> {
+                        if (session != captureSession || owner == null) {
+                            if (path != null) new java.io.File(path).delete();
+                            return;
+                        }
+                        Bundle capture = new Bundle(); capture.putBoolean("ok", true);
+                        capture.putString("screenshot", path); send(REPLY, request, capture);
+                    });
+                    return;
+                }
                 case "speed": runtime.speed(data.getFloat("speed", Float.NaN)); break;
                 case "volume": runtime.volume(data.getFloat("volume", Float.NaN)); break;
                 case "close": runtime.close(); runtime.outputWindow(new Bundle()); setSurface(null); break;

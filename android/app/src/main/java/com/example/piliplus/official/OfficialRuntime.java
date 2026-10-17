@@ -1122,6 +1122,72 @@ final class OfficialRuntime {
         if(openRequest.getBoolean("isLive",false))throw new IllegalStateException("Live playback cannot seek");
         invoke(player,"seekTo",true,position,5000L);
     }
+    private long captureSerial;
+    private boolean capturePending;
+
+    void screenshot(long requestedLoad, java.util.function.Consumer<String> reply) {
+        if (capturePending || requestedLoad != load || !prepared || player == null
+                || width <= 0 || height <= 0) { reply.accept(null); return; }
+        final long token = generation, capture = ++captureSerial;
+        capturePending = true;
+        final boolean[] replied = {false};
+        java.util.function.Consumer<android.graphics.Bitmap> finish = bitmap -> worker.post(() -> {
+            File file = null;
+            try {
+                if (capture != captureSerial || !capturePending) return;
+                capturePending = false;
+                if (replied[0]) return;
+                replied[0] = true;
+                if (token == generation && bitmap != null) {
+                    file = File.createTempFile("official-capture-", ".png", context.getCacheDir());
+                    try (OutputStream out = new FileOutputStream(file)) {
+                        if (!bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out))
+                            throw new IOException("Cannot encode screenshot");
+                    }
+                }
+                reply.accept(file == null ? null : file.getAbsolutePath());
+                file = null;
+            } catch (Exception error) { reply.accept(null); }
+            finally { if (bitmap != null) bitmap.recycle(); if (file != null) file.delete(); }
+        });
+        worker.postDelayed(() -> {
+            if (capture == captureSerial && capturePending && !replied[0]) {
+                // Keep the renderer busy until its callback arrives; it has only one listener.
+                replied[0] = true;
+                reply.accept(null);
+            }
+        }, 3000);
+        try {
+            if (externalOutput != null) {
+                Object listener = Proxy.newProxyInstance(loader, new Class<?>[]{cls(
+                    "tv.danmaku.ijk.media.player.render.output.IImageCapture$OnCaptureFrameAvailableListener")},
+                    (proxy, method, args) -> {
+                        switch (method.getName()) {
+                            case "onCaptureFrameAvailable": finish.accept((android.graphics.Bitmap)args[0]); return null;
+                            case "toString": return "PiliPlusCapture";
+                            case "hashCode": return System.identityHashCode(proxy);
+                            case "equals": return proxy == args[0];
+                            default: throw new UnsupportedOperationException(method.getName());
+                        }
+                    });
+                invoke(externalOutput, "setCaptureFrameAvailableListener", listener);
+                invoke(externalOutput, "captureOneImage");
+            } else if (hdrSurface != null && hdrSurface.surface.isValid()) {
+                // shortcut: PNG is SDR; HDR export needs a separate color-managed capture path.
+                float scale = Math.min(1f, 1920f / Math.max(width, height));
+                android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(
+                    Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale)),
+                    android.graphics.Bitmap.Config.ARGB_8888);
+                try {
+                    android.view.PixelCopy.request(hdrSurface.surface, bitmap, result -> {
+                        if (result == android.view.PixelCopy.SUCCESS) finish.accept(bitmap);
+                        else { bitmap.recycle(); finish.accept(null); }
+                    }, worker);
+                } catch (RuntimeException error) { bitmap.recycle(); throw error; }
+            } else finish.accept(null);
+        } catch (Exception error) { finish.accept(null); }
+    }
+
     void speed(float value) throws Exception {
         if(!Float.isFinite(value)||value<.25f||value>4)throw new IllegalArgumentException("Invalid speed");
         // Official 9.14 setPlaySpeed uses 1.99 internally while displaying and saving 2x.
@@ -1133,6 +1199,7 @@ final class OfficialRuntime {
     }
     void release() throws Exception {
         cancelResourceRefresh();
+        ++captureSerial;capturePending=false;
         ++generation;
         if(awaitingPreload!=0) {
             if(preloads!=null)preloads.discardExcept(null);
