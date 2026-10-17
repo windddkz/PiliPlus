@@ -194,9 +194,13 @@ class _RcmdPageState extends State<RcmdPage>
     LoadingState<List<dynamic>?> loadingState,
   ) {
     if (loadingState case Success(:final response?)) {
+      final newList = !identical(_prefetchList, response);
       _prefetchList = response;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _schedulePrefetch();
+        if (!mounted || !identical(_prefetchList, response)) return;
+        _schedulePrefetch();
+        // New results are ready after layout; keep the timer for scroll settling.
+        if (newList) _retainPrefetch();
       });
     } else {
       _prefetchList = null;
