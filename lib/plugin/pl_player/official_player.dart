@@ -50,6 +50,7 @@ class OfficialPlayer extends PlatformPlayer {
   Future<void>? _disposing;
   bool _disposed = false;
   bool _dead = false;
+  bool processReclaimed = false;
   bool _ducked = false;
   int _volumeRevision = 0;
   double _outputVolume(double volume) =>
@@ -355,6 +356,10 @@ class OfficialPlayer extends PlatformPlayer {
         _nativePrepared = false;
         _cancelSeek(PlatformException(code: code));
         _dead = code == 'native_process_died' || code == 'binding_died';
+        processReclaimed =
+            code == 'native_process_died' &&
+            event['processReclaimed'] == true &&
+            _preparing == null;
         if (_preparing case final pending? when !pending.isCompleted) {
           pending.completeError(
             PlatformException(code: code, details: event['diagnostic']),
@@ -538,7 +543,15 @@ class OfficialPlayer extends PlatformPlayer {
   }
 
   @override
-  Future<void> pause() => _send('pause');
+  Future<void> pause() async {
+    if (processReclaimed) {
+      state.playing = false;
+      playingController.add(false);
+      return;
+    }
+    await _send('pause');
+  }
+
   @override
   Future<void> playOrPause() => state.playing ? pause() : play();
   @override

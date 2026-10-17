@@ -1,3 +1,4 @@
+import 'dart:async' show unawaited;
 import 'dart:io' show Platform;
 import 'dart:math';
 
@@ -193,8 +194,13 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final isResume = state == .resumed;
-    final ctr = videoDetailController.plPlayerController..visible = isResume;
+    final ctr = videoDetailController.plPlayerController;
+    final becameVisible = isResume && !ctr.visible;
+    ctr.visible = isResume;
     if (isResume) {
+      unawaited(
+        ctr.restoreReclaimedPlayer(newForegroundSession: becameVisible),
+      );
       if (!ctr.showDanmaku) {
         introController.startTimer();
         ctr.showDanmaku = true;

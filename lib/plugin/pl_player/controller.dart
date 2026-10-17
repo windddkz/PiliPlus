@@ -90,6 +90,7 @@ class PlPlayerController
   Future<void> playForAudioFocus() async {
     final revision = _sourceRevision;
     await _fallback;
+    await restoreReclaimedPlayer();
     if (!_currentSource(revision) || !audioFocusAvailable) return;
     await _videoPlayerController?.play();
     if (audioFocusAvailable) playerStatus = .playing;
@@ -117,6 +118,8 @@ class PlPlayerController
   Future<PlatformPlayer>? _fallback;
   Future<void> _playerCommands = Future.value();
   Future<void>? _backendDisposal;
+  Future<void>? _officialRecovery;
+  int _officialRecoveryRevision = -1;
   int _sourceRevision = 0;
 
   Future<T> _enqueuePlayer<T>(Future<T> Function() action) {
@@ -143,7 +146,10 @@ class PlPlayerController
 
   Future<void>? _cancelPreparingOfficial() {
     final player = _videoPlayerController;
-    if (player is! OfficialPlayer || !player.isPreparing) return null;
+    if (player is! OfficialPlayer ||
+        (!player.isPreparing && !player.processReclaimed)) {
+      return null;
+    }
     // Unblock the current queue item before waiting for the next one.
     _removeListeners();
     _videoPlayerController = null;
@@ -1176,6 +1182,64 @@ class PlPlayerController
     }).whenComplete(() => _fallback = null);
   }
 
+  Future<void> restoreReclaimedPlayer({bool newForegroundSession = false}) {
+    if (_officialRecovery != null) return _officialRecovery!;
+    // A later visit may recover again; repeated failures within one visit must stop.
+    if (newForegroundSession) _officialRecoveryRevision = -1;
+    final previous = _videoPlayerController;
+    final revision = _sourceRevision;
+    if (!visible && previous is OfficialPlayer && previous.processReclaimed) {
+      _officialRecoveryRevision = -1;
+    }
+    if (!_currentSource(revision) ||
+        previous is! OfficialPlayer ||
+        !previous.processReclaimed ||
+        _officialRecoveryRevision == revision) {
+      return Future.value();
+    }
+    return _officialRecovery =
+        _enqueuePlayer(() async {
+              if (!_currentSource(revision) ||
+                  !identical(previous, _videoPlayerController)) {
+                return;
+              }
+              _officialRecoveryRevision = revision;
+              final position = previous.state.position;
+              final speed = previous.state.rate;
+              final volume = previous.state.volume;
+              _removeListeners();
+              await _disposeBackend(previous);
+              if (!identical(previous, _videoPlayerController)) return;
+              _videoPlayerController = null;
+              _videoController = null;
+              if (!_currentSource(revision)) return;
+              await _createVideoController(
+                dataSource,
+                isLive ? null : position,
+                _sourceVolume,
+              );
+              if (!_currentSource(revision)) return;
+              final next = _videoPlayerController!;
+              await next.setRate(speed);
+              await next.setVolume(volume);
+              await setAudioDucked(
+                audioSessionHandler?.isDucked(this) ?? false,
+              );
+              if (!_currentSource(revision)) return;
+              dataStatus.value = DataStatus.loaded;
+              if (audioSessionHandler?.wantsPlayback(this) ?? false) {
+                await next.play();
+              }
+            })
+            .catchError((Object error) {
+              if (_currentSource(revision)) {
+                dataStatus.value = DataStatus.error;
+                SmartDialog.showToast('恢复播放器失败，请重新打开视频');
+              }
+            })
+            .whenComplete(() => _officialRecovery = null);
+  }
+
   Future<PlatformPlayer> _switchToMpv(String reason) async {
     final previous = _videoPlayerController;
     if (previous is! OfficialPlayer) {
@@ -1379,6 +1443,11 @@ class PlPlayerController
           return;
         }
         if (player is OfficialPlayer) {
+          if (player.processReclaimed &&
+              (!visible || _officialRecoveryRevision != _sourceRevision)) {
+            if (visible) unawaited(restoreReclaimedPlayer());
+            return;
+          }
           if (event == 'official:resource_unavailable') {
             dataStatus.value = DataStatus.error;
             SmartDialog.showToast('播放地址失效，重新取流失败，请重试');

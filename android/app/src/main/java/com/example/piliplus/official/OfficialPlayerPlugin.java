@@ -79,6 +79,7 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
     private int nativePid;
     private long sessionStarted;
     private String lastStage = "bind", terminationReason;
+    private boolean processReclaimed;
     private MethodChannel.Result creating;
     private Pending releasing;
     private IBinder.DeathRecipient death;
@@ -344,12 +345,16 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
         try { remote.send(message); } catch (RemoteException ignored) { }
     }
     private String exitDiagnostic() {
+        processReclaimed=false;
         String result=(terminationReason==null?"unexpected_exit":terminationReason)+"/"+lastStage;
         if (Build.VERSION.SDK_INT >= 30 && nativePid > 0) {
             try {
                 ActivityManager manager=(ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
                 for (ApplicationExitInfo info:manager.getHistoricalProcessExitReasons(context.getPackageName(),nativePid,4)) {
-                    if (info.getTimestamp()<sessionStarted || !info.getProcessName().equals(context.getPackageName()+":official_player")) continue;
+                    if (info.getPid()!=nativePid || info.getTimestamp()<sessionStarted || !info.getProcessName().equals(context.getPackageName()+":official_player")) continue;
+                    processReclaimed=ProcessReclaimPolicy.canRecover(
+                        terminationReason==null && "playback".equals(lastStage),
+                        info.getReason(),info.getStatus(),info.getDescription());
                     return result+"/reason_"+info.getReason()+"/status_"+info.getStatus();
                 }
             } catch (RuntimeException ignored) { }
@@ -373,7 +378,8 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
             if (operation.result != null) operation.result.error(reason, "Official process unavailable", diagnostic);
         }
         pending.clear(); cleanup();
-        if (token != 0) emit(values("session", token, "event", "error", "error", reason, "diagnostic", diagnostic));
+        if (token != 0) emit(values("session", token, "event", "error", "error", reason, "diagnostic", diagnostic,
+            "processReclaimed", reason.equals("native_process_died") && processReclaimed));
     }
     private void cleanup() {
         cancelWaitingOpen("disposed");
