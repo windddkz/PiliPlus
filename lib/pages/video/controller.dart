@@ -767,6 +767,9 @@ class VideoDetailController extends GetxController
               officialPreloadToken: data.officialPreloadToken,
               videoTrack: _videoTrack,
               audioTrack: _audioTrack,
+              videoTracks: _videoTrack != null && _audioTrack != null
+                  ? DashSelection.videoLadder(data, _videoTrack!)
+                  : const [],
               refresh: _refreshOfficialSource,
               onRefreshed: _acceptRefreshedSource,
             ),
@@ -860,12 +863,29 @@ class VideoDetailController extends GetxController
         identical(plPlayerController.dataSource, source) &&
         identical(plPlayerController.videoPlayerController, player);
     if (!current() || videoTrack == null) return null;
-    final result = await _getVideoUrl(videoTrack.id);
+    final quality = source.videoTracks.fold(
+      videoTrack.id,
+      (highest, track) => track.id > highest ? track.id : highest,
+    );
+    final result = await _getVideoUrl(quality);
     if (!current()) return null;
     if (result case Success(:final response)) {
+      if (source.videoTracks.isNotEmpty && response.dash != null) {
+        await _supplementVideoQualities(response);
+        if (!current()) return null;
+      }
+      final ladder = DashSelection.refreshVideoLadder(
+        response,
+        source.videoTracks,
+      );
+      if (ladder == null) return null;
       final video = response.dash?.video
           ?.where(
-            (item) => item.id == videoTrack.id && item.codecid == codec,
+            (item) =>
+                item.id == videoTrack.id &&
+                (videoTrack.codecs != null
+                    ? item.codecs == videoTrack.codecs
+                    : item.codecid == codec),
           )
           .firstOrNull;
       final audio = response.dash?.audio
@@ -881,13 +901,17 @@ class VideoDetailController extends GetxController
       final next = NetworkSource(
         videoSource: videoUrl,
         audioSource: audioUrl,
-        videoTrack: DashTrack(
-          source: videoUrl,
-          id: video.id,
-          bandwidth: video.bandWidth,
-          codecs: video.codecs,
-          urls: video.playUrls,
-        ),
+        videoTracks: ladder,
+        automaticVideo: source.automaticVideo,
+        videoTrack: ladder.isNotEmpty
+            ? ladder.firstWhere((track) => track.id == videoTrack.id)
+            : DashTrack(
+                source: videoUrl,
+                id: video.id,
+                bandwidth: video.bandWidth,
+                codecs: video.codecs,
+                urls: video.playUrls,
+              ),
         audioTrack: audio == null
             ? null
             : DashTrack(

@@ -3,6 +3,9 @@ import 'package:PiliPlus/models/common/video/video_quality.dart';
 import 'package:PiliPlus/models/video/play/selection.dart';
 import 'package:PiliPlus/models/video/play/url.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
+import 'package:PiliPlus/models/common/video/cdn_type.dart';
+import 'package:PiliPlus/utils/video_utils.dart';
 
 void main() {
   VideoItem video(int quality, String codec) => VideoItem(
@@ -17,6 +20,8 @@ void main() {
   });
   late PlayUrlModel resource;
   setUp(() {
+    VideoUtils.cdnService = CDNService.baseUrl;
+    VideoUtils.disableAudioCDN = false;
     resource = PlayUrlModel(
       acceptQuality: [120, 80, 64],
       dash: Dash(
@@ -95,4 +100,120 @@ void main() {
     expect(resource.dash!.audio, originalAudios);
     expect(resource.lastPlayTime, 12345);
   });
+  DashTrack track(VideoItem video, {String? source}) => DashTrack(
+    source: source ?? video.baseUrl!,
+    id: video.id,
+    bandwidth: video.bandWidth,
+    codecs: video.codecs,
+    urls: video.playUrls,
+  );
+  test('video ladder preserves fixed selected source and filters codecs', () {
+    final selected = track(
+      resource.dash!.video![1],
+      source: 'https://chosen.invalid/80',
+    );
+    final tracks = DashSelection.videoLadder(resource, selected);
+    expect(tracks.map((t) => t.id), [80, 64]);
+    expect(tracks.first, same(selected));
+    expect(tracks.first.source, 'https://chosen.invalid/80');
+    expect(resource.dash!.audio!.first.id, 30251);
+    expect(tracks.clear, throwsUnsupportedError);
+    final lower = track(resource.dash!.video!.last);
+    final lowerList = DashSelection.videoLadder(resource, lower);
+    expect(lowerList.last, same(lower));
+    expect(lower.id, 64);
+  });
+  test('supplemented qualities do not invalidate the preloaded ladder', () {
+    resource.officialPreloadVideos = List.unmodifiable(resource.dash!.video!);
+    final selected = track(resource.dash!.video![1]);
+    final before = DashSelection.videoLadder(resource, selected);
+    final extra = video(32, 'avc1.640');
+    resource.dash!.video!.add(extra);
+    final after = DashSelection.videoLadder(resource, selected);
+    expect(
+      after.map((t) => t.forSource(t.source)),
+      before.map((t) => t.forSource(t.source)),
+    );
+    final newlySelected = track(extra);
+    expect(
+      DashSelection.videoLadder(resource, newlySelected).map((t) => t.id),
+      [80, 64, 32],
+    );
+  });
+  test('HDR families remain separate and unknown codecs keep legacy path', () {
+    for (final quality in [125, 126, 129]) {
+      final hdr = video(quality, 'hev1.2');
+      resource.dash!.video!.add(hdr);
+      expect(DashSelection.videoLadder(resource, track(hdr)).map((t) => t.id), [
+        quality,
+      ]);
+    }
+    final sdr = track(resource.dash!.video![2]);
+    expect(DashSelection.videoLadder(resource, sdr).map((t) => t.id), [
+      120,
+      80,
+    ]);
+    for (final codec in ['unknown', 'avc1', 'av01']) {
+      final other = video(32, codec);
+      resource.dash!.video!.add(other);
+      expect(DashSelection.videoLadder(resource, track(other)), isEmpty);
+    }
+  });
+  test('ladder deduplicates quality and skips missing alternatives', () {
+    final duplicate = video(64, 'avc1.640');
+    resource.dash!.video!.add(duplicate);
+    final missing = video(32, 'avc1.640')..baseUrl = null;
+    resource.dash!.video!.add(missing);
+    final tracks = DashSelection.videoLadder(
+      resource,
+      track(resource.dash!.video![1]),
+    );
+    expect(tracks.map((t) => t.id), [80, 64]);
+    expect(tracks.last.source, resource.dash!.video![4].baseUrl);
+  });
+  test('refresh updates every allowed track without expanding the ladder', () {
+    final previous = DashSelection.videoLadder(
+      resource,
+      track(resource.dash!.video![1]),
+    );
+    for (final item in resource.dash!.video!) {
+      item.baseUrl = item.baseUrl!.replaceFirst(
+        'media.invalid',
+        'fresh.invalid',
+      );
+      item.backupUrl = ['https://backup.invalid/${item.id}'];
+    }
+    resource.dash!.video!.add(video(32, 'avc1.640'));
+    final fresh = DashSelection.refreshVideoLadder(resource, previous)!;
+    expect(fresh.map((t) => t.id), [80, 64]);
+    expect(
+      fresh.every((t) => t.source.startsWith('https://fresh.invalid/')),
+      true,
+    );
+    expect(
+      fresh.every((t) => !t.urls.any((u) => u.contains('media.invalid'))),
+      true,
+    );
+    expect(previous.every((t) => t.source.contains('media.invalid')), true);
+    expect(fresh.clear, throwsUnsupportedError);
+  });
+  test(
+    'refresh rejects missing quality, changed codec profile or missing URL',
+    () {
+      final previous = DashSelection.videoLadder(
+        resource,
+        track(resource.dash!.video![1]),
+      );
+      final last = resource.dash!.video!.removeLast();
+      expect(DashSelection.refreshVideoLadder(resource, previous), isNull);
+      resource.dash!.video!.add(last);
+      last.codecs = 'avc1.641';
+      expect(DashSelection.refreshVideoLadder(resource, previous), isNull);
+      last
+        ..codecs = 'avc1.640'
+        ..baseUrl = null;
+      expect(DashSelection.refreshVideoLadder(resource, previous), isNull);
+      expect(DashSelection.refreshVideoLadder(resource, const []), isEmpty);
+    },
+  );
 }

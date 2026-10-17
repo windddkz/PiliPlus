@@ -72,6 +72,12 @@ final class OfficialRuntime {
     private final OfficialResourceRefresh<Bundle> resourceRefresh=new OfficialResourceRefresh<>();
     private boolean initAttempted, prepared, graphActive, dspActive, awaitingMediaInfo;
     private volatile boolean wantedPlaying;
+    private OfficialVideoTracks videoPolicy;
+    private int actualVideoQuality;
+    private boolean automaticVideoActive;
+    private long videoControlRequest, lastVideoControlRequest;
+    private int videoControlTarget;
+    private boolean videoControlPreviousAuto;
     private float speed = 1, volume = 1;
     private long startPosition;
     private int width, height, displayWidth, displayHeight, appliedEndpoint;
@@ -312,9 +318,26 @@ final class OfficialRuntime {
                 switch(event) {
                     case "prepared":
                         updateDisplaySize();
+                        if(videoPolicy!=null) {
+                            invoke(item,"updateDashAutoQnRange",videoPolicy.min(),videoPolicy.max());
+                            invoke(player,"setDashAutoEnable",videoPolicy.automatic);
+                            automaticVideoActive=videoPolicy.automatic;emitQuality();
+                        }
                         prepared=true;stage("playback");if(route.endpoint()!=appliedEndpoint)applyRoute();speed(speed);invoke(player,"setVolume",volume);
                         if(startPosition>0)invoke(player,"seekTo",true,startPosition,5000L);
                         if(wantedPlaying)invoke(player,"start");emit("prepared");heartbeat(token);break;
+                    case "quality":
+                        if(((Number)args[3]).intValue()==0) {
+                            int quality=((Number)args[2]).intValue();
+                            if(videoPolicy!=null)videoPolicy.get(quality);
+                            actualVideoQuality=quality;
+                            emitQuality();
+                        }
+                        break;
+                    case "video_control":
+                        videoControlState(((Number)args[0]).longValue(),((Number)args[1]).intValue(),
+                            ((Number)args[2]).intValue(),((Number)args[4]).intValue(),((Number)args[5]).intValue());
+                        break;
                     case "completed":wantedPlaying=false;emit("completed");break;
                     case "first_frame":
                         if(Integer.valueOf(0).equals(args[0]))emit("first_video_frame");break;
@@ -341,20 +364,105 @@ final class OfficialRuntime {
         });
     }
 
+    private void emitQuality() {
+        if(actualVideoQuality<=0)return;
+        Bundle event=new Bundle();event.putString("event","quality");event.putInt("quality",actualVideoQuality);
+        event.putBoolean("automaticVideo",automaticVideoActive);emit(event);
+    }
+    void videoControl(Bundle request) throws Exception {
+        long id=request.getLong("requestId",0);
+        if(request.getLong("load",-1)!=load || !prepared || player==null || videoPolicy==null)
+            throw new IllegalStateException("Video control requires current prepared ladder");
+        if(id<=lastVideoControlRequest || videoControlRequest!=0)
+            throw new IllegalStateException("Stale or pending video control");
+        boolean automatic=request.getBoolean("automatic");
+        int quality=request.getInt("quality",0);
+        if(automatic) {
+            if(quality!=0)throw new IllegalArgumentException("Automatic video has no fixed target");
+            for(OfficialStream track:videoPolicy.tracks)if(track.bandwidth<=0)
+                throw new IllegalArgumentException("Automatic video requires bitrate metadata");
+        } else videoPolicy.get(quality);
+        lastVideoControlRequest=id;
+        videoControlPreviousAuto=automaticVideoActive;
+        if(automatic) {
+            invoke(player,"setDashAutoEnable",true);automaticVideoActive=true;
+            emitQuality();emitVideoControl(id,true);return;
+        }
+        // Same-qn requests still go through native: an automatic switch may already be in flight.
+        invoke(player,"setDashAutoEnable",false);automaticVideoActive=false;emitQuality();
+        videoControlRequest=id;videoControlTarget=quality;
+        try {
+            int result=((Number)invoke(player,"switchStreamSmooth",id,0,quality)).intValue();
+            if(result!=0)finishVideoControl(false);
+        } catch(Exception error) {
+            finishVideoControl(false);throw error;
+        }
+    }
+    void videoControlState(long request,int phase,int mediaType,int target,int error) throws Exception {
+        if(request!=videoControlRequest || request==0 || mediaType!=0 || phase==0)return;
+        finishVideoControl(phase==1 && error==0 && target==videoControlTarget);
+    }
+    private void finishVideoControl(boolean success) throws Exception {
+        long id=videoControlRequest;
+        if(id==0)return;
+        videoControlRequest=0;videoControlTarget=0;
+        if(!success) {
+            invoke(player,"setDashAutoEnable",videoControlPreviousAuto);
+            automaticVideoActive=videoControlPreviousAuto;
+        }
+        emitQuality();emitVideoControl(id,success);
+    }
+    private void emitVideoControl(long id,boolean success) {
+        Bundle event=new Bundle();event.putString("event","video_control");
+        event.putLong("requestId",id);event.putBoolean("success",success);
+        event.putBoolean("automaticVideo",automaticVideoActive);emit(event);
+    }
+    private static OfficialVideoTracks videoPolicy(Bundle request) {
+        ArrayList<Bundle> list=request.getParcelableArrayList("videoTracks");
+        if(list==null) {
+            if(request.getBoolean("automaticVideo"))throw new IllegalArgumentException("Missing video ladder");
+            return null;
+        }
+        if(request.getBoolean("isLive") || request.getBoolean("audioOnly") || request.getString("audio")==null || list.size()>20)
+            throw new IllegalArgumentException("Video ladder requires network DASH video and audio");
+        List<OfficialStream> tracks=new ArrayList<>();
+        for(Bundle value:list) {
+            if(value==null)throw new IllegalArgumentException("Missing ladder track");
+            tracks.add(streamInfo(value,value.getString("source")));
+        }
+        OfficialStream audio=streamInfo(request.getBundle("audioTrack"),request.getString("audio"));
+        if(audio==null)throw new IllegalArgumentException("Video ladder requires an identified audio track");
+        return new OfficialVideoTracks(streamInfo(request.getBundle("sourceTrack"),request.getString("source")),tracks,request.getBoolean("automaticVideo"));
+    }
+    private List<Object> videoStreams(OfficialVideoTracks policy,OfficialStream single) throws Exception {
+        List<Object> values=new ArrayList<>();
+        for(OfficialStream track:policy==null?Collections.singletonList(single):policy.tracks)values.add(dashStream(track,0));
+        return values;
+    }
+    private int initialQuality(OfficialVideoTracks policy,OfficialStream single) throws Exception {
+        if(policy==null || !policy.automatic)return single.id;
+        int[] ids=new int[policy.tracks.size()];long[] rates=new long[ids.length];
+        for(int i=0;i<ids.length;i++){ids[i]=policy.tracks.get(i).id;rates[i]=policy.tracks.get(i).bandwidth;}
+        int low=Math.min(policy.max(),Math.max(32,policy.min())),high=Math.max(low,Math.min(116,policy.max()));
+        int chosen=(Integer)bridge("chooseStartup",single.id,low,high,ids,rates);
+        policy.get(chosen);return chosen;
+    }
     private NativeMedia media(Bundle request,DashSource[] tracks) throws Exception {
         String source=request.getString("source"),audio=request.getString("audio");
         String userAgent=request.getString("userAgent","PiliPlus"),referer=request.getString("referer","https://www.bilibili.com/");
         OfficialStream sourceTrack=streamInfo(request.getBundle("sourceTrack"),source);
         OfficialStream audioTrack=streamInfo(request.getBundle("audioTrack"),audio);
         boolean isLive=request.getBoolean("isLive",false);
+        OfficialVideoTracks policy=videoPolicy(request);
         Map<String,String> options=new HashMap<>();options.put("user_agent",userAgent);options.put("referer",referer);
         if(!isLive && useNativeMetadata(sourceTrack,audioTrack)) {
             if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.d("PiliMedia","native DASH metadata video="+sourceTrack.videoCodec()+" audio=-1");
             Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField("VOD").get(null);
-            Object asset=construct("com.bilibili.ijk.media.MediaAsset$Dash",audioTrack.id,sourceTrack.id,
-                Collections.singletonList(dashStream(sourceTrack,0)),Collections.singletonList(dashStream(audioTrack,1)),scheme,options,null);
+            Object asset=construct("com.bilibili.ijk.media.MediaAsset$Dash",audioTrack.id,initialQuality(policy,sourceTrack),
+                videoStreams(policy,sourceTrack),Collections.singletonList(dashStream(audioTrack,1)),scheme,options,null);
             return new NativeMedia(asset,false,true);
         }
+        if(policy!=null)throw new IllegalArgumentException("Video ladder requires native metadata");
             Object asset;
             boolean hdr=false;
             if(audio!=null&&!audio.isEmpty()) {
@@ -440,6 +548,7 @@ final class OfficialRuntime {
     private String preloadKey(Bundle request) throws Exception {
         String token=request.getString("preloadToken");if(token==null)return null;
         if(!token.matches("[A-Za-z0-9_-]{1,80}"))throw new IllegalArgumentException("Invalid preload token");
+        OfficialVideoTracks policy=videoPolicy(request);
         JSONObject key=new JSONObject();key.put("token",token);key.put("position",request.getLong("position",0));
         for(String name:new String[]{"source","audio","userAgent","referer"})key.put(name,request.getString(name,""));
         for(String name:new String[]{"sourceTrack","audioTrack"}){
@@ -447,6 +556,14 @@ final class OfficialRuntime {
             JSONObject track=new JSONObject();track.put("source",info.getString("source"));track.put("id",info.getInt("id"));
             track.put("codecs",info.getString("codecs"));track.put("bandwidth",info.getInt("bandwidth"));track.put("backups",new org.json.JSONArray(info.getStringArrayList("backups")));
             key.put(name,track);
+        }
+        if(policy!=null) {
+            org.json.JSONArray tracks=new org.json.JSONArray();
+            for(OfficialStream value:policy.tracks) {
+                JSONObject track=new JSONObject();track.put("source",value.source);track.put("id",value.id);
+                track.put("codecs",value.codecs);track.put("bandwidth",value.bandwidth);track.put("backups",new org.json.JSONArray(value.backups));tracks.put(track);
+            }
+            key.put("videoTracks",tracks);key.put("automaticVideo",policy.automatic);
         }
         return hash(key.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
@@ -588,6 +705,7 @@ final class OfficialRuntime {
             throw new IOException("Preload stop unconfirmed");
     }
     private void useItem(Object next,long token,Bundle request) throws Exception {
+        videoPolicy=videoPolicy(request);
         item=next;awaitingPreload=0;awaitingPreloader=null;resourceRefresh.open();
         AtomicInteger resourceUpdates=new AtomicInteger();
         invoke(item,"setResourceUpdateListener",resourceListener(token,new Bundle(request),resourceUpdates));
@@ -639,7 +757,8 @@ final class OfficialRuntime {
             player=construct("com.bilibili.ijk.player.IJKMediaPlayer");
             for(Object[] binding:new Object[][]{{"setOnPreparedCallback",1,"prepared"},{"setOnCompletionCallback",1,"completed"},{"setOnErrorCallback",2,"error"},
                     {"setOnSeekCompleteCallback",5,"seek_complete"},{"setOnBufferingUpdateCallback",2,"buffering"},{"setOnVideoSizeChangedCallback",3,"video_size"},
-                    {"setOnFirstFrameRenderedCallback",1,"first_frame"}})
+                    {"setOnFirstFrameRenderedCallback",1,"first_frame"},{"setOnQnUpdateCallback",4,"quality"},
+                    {"setOnStreamSwitchStateChangedCallback",6,"video_control"}})
                 invoke(player,(String)binding[0],callback((Integer)binding[1],(String)binding[2],token));
             boolean audioOnly=request.getBoolean("audioOnly",false);
             invoke(player,"setAudioOnly",audioOnly);invoke(player,"setVolume",volume);speed(speed);
@@ -799,6 +918,9 @@ final class OfficialRuntime {
                     resourceUpdates.decrementAndGet();
                     for(String key:new String[]{"source","audio"})openRequest.putString(key,next.getString(key));
                     for(String key:new String[]{"sourceTrack","audioTrack"})openRequest.putBundle(key,next.getBundle(key));
+                    openRequest.putParcelableArrayList("videoTracks",next.getParcelableArrayList("videoTracks"));
+                    openRequest.putBoolean("automaticVideo",next.getBoolean("automaticVideo"));
+                    videoPolicy=videoPolicy(openRequest);
                     if(original.getBoolean("isLive",false)) {
                         // A restarted live encoder may reset PTS; old queues then repeatedly starve video.
                         Bundle reopen=new Bundle(openRequest);reopen.putLong("position",0);
@@ -821,6 +943,9 @@ final class OfficialRuntime {
         OfficialStream source=streamInfo(next.getBundle("sourceTrack"),next.getString("source"));
         OfficialStream before=streamInfo(original.getBundle("sourceTrack"),original.getString("source"));
         if(source==null || before==null || source.id!=before.id)throw new IOException("Refresh changed source track");
+        OfficialVideoTracks policy=videoPolicy(original),replacement=videoPolicy(next);
+        if(policy!=null)policy.validateRefresh(replacement);
+        else if(replacement!=null)throw new IOException("Refresh added a video policy");
         Object scheme=invoke(old,"getScheme"),options=invoke(old,"getOption");
         if(original.getBoolean("isLive",false)) {
             if(!old.getClass().getName().endsWith("$Normal") || !"LIVE".equals(scheme.toString()) || next.getString("audio")!=null)
@@ -836,6 +961,17 @@ final class OfficialRuntime {
             if(useNativeMetadata(before,prior) && useNativeMetadata(source,audio)) {
                 Object oldVideo=((List<?>)invoke(old,"getVideoStreamList")).get(0),oldAudio=((List<?>)invoke(old,"getAudioStreamList")).get(0);
                 if(!invoke(oldVideo,"getCodecId").equals(source.videoCodec()) || !invoke(oldAudio,"getCodecId").equals(-1))throw new IOException("Refresh changed codec");
+                if(replacement!=null) {
+                    List<?> oldVideos=(List<?>)invoke(old,"getVideoStreamList");
+                    if(oldVideos.size()!=replacement.tracks.size())throw new IOException("Refresh changed video ladder size");
+                    for(Object candidate:oldVideos) {
+                        OfficialStream value=replacement.get((Integer)invoke(candidate,"getQn"));
+                        if(!invoke(candidate,"getCodecId").equals(value.videoCodec()))throw new IOException("Refresh changed ladder codec");
+                    }
+                    int current=(Integer)invoke(old,"getCurVideoQn");replacement.get(current);
+                    return construct("com.bilibili.ijk.media.MediaAsset$Dash",audio.id,current,
+                        videoStreams(replacement,source),Collections.singletonList(dashStream(audio,1)),scheme,options,null);
+                }
                 return construct("com.bilibili.ijk.media.MediaAsset$Dash",audio.id,source.id,
                     Collections.singletonList(dashStream(source,0)),Collections.singletonList(dashStream(audio,1)),scheme,options,null);
             }
@@ -881,6 +1017,7 @@ final class OfficialRuntime {
             float nativeSpeed=(Float)invoke(player,"getSpeed");
             b.putBoolean("playing",(Boolean)invoke(player,"isPlaying"));b.putFloat("speed",speed==2f&&nativeSpeed==1.99f?2f:nativeSpeed);b.putFloat("volume",volume);
             b.putInt("width",displayWidth);b.putInt("height",displayHeight);
+            b.putInt("videoQuality",actualVideoQuality);b.putBoolean("automaticVideo",automaticVideoActive);
             Object monitor=invoke(player,"getPlayerMonitor");long buffered=(Long)invoke(monitor,"getPacketQueueCacheDurationMs",1);
             long duration=b.getLong("duration"),position=b.getLong("position");
             b.putInt("bufferedPercent",duration>0?(int)Math.max(0,Math.min(100,100.0*(position+Math.max(0,buffered))/duration)):0);
@@ -973,6 +1110,8 @@ final class OfficialRuntime {
             }
             if(!result.getBoolean("restored"))throw new IOException("Adapter not restored");}
         if(dspActive){JSONObject result=new JSONObject((String)bridge("finishDspRoute"));dspActive=false;if(!result.getBoolean("slot_restored"))throw new IOException("DSP not restored");}
+        videoPolicy=null;actualVideoQuality=0;automaticVideoActive=false;
+        videoControlRequest=lastVideoControlRequest=0;videoControlTarget=0;
         width=height=displayWidth=displayHeight=0;openRequest=null;outputSurface=null;loudnessMode="off";loudness=OfficialLoudness.resolve("off",null,null);
     }
 }

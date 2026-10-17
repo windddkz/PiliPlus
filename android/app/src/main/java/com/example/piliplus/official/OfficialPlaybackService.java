@@ -85,6 +85,7 @@ public final class OfficialPlaybackService extends Service {
                 case "mirror": runtime.mirror(data); break;
                 case "viewport": runtime.viewport(data); break;
                 case "resize": runtime.outputWindow(data); runtime.resize(); break;
+                case "videoControl": runtime.videoControl(data); break;
                 case "seek": runtime.seek(data.getLong("position", -1)); break;
                 case "speed": runtime.speed(data.getFloat("speed", Float.NaN)); break;
                 case "volume": runtime.volume(data.getFloat("volume", Float.NaN)); break;

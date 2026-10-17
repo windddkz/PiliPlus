@@ -69,6 +69,275 @@ void main() {
     userAgent: 'test-agent',
     referer: 'https://example.invalid/',
   );
+  NetworkSource ladderSource({
+    Future<NetworkSource?> Function(NetworkSource)? refresh,
+  }) {
+    final audio = preloadedSource().audioTrack!;
+    final video = DashTrack(
+      source: 'https://example.invalid/120',
+      id: 120,
+      bandwidth: 4000,
+      codecs: 'avc1.640033',
+      urls: const [],
+    );
+    final low = DashTrack(
+      source: 'https://example.invalid/32',
+      id: 32,
+      bandwidth: 1000,
+      codecs: 'avc1.640033',
+      urls: const [],
+    );
+    return NetworkSource(
+      videoSource: video.source,
+      audioSource: audio.source,
+      videoTrack: video,
+      audioTrack: audio,
+      videoTracks: [video, low],
+      automaticVideo: true,
+      refresh: refresh,
+    );
+  }
+
+  Future<OfficialPlayer> preparedLadder() async {
+    final player = await create();
+    final ready = player.openSource(
+      ladderSource(),
+      userAgent: 'test',
+      referer: 'test',
+      audioOnly: false,
+    );
+    await Future<void>.delayed(Duration.zero);
+    await emit({'event': 'prepared'});
+    await ready;
+    return player;
+  }
+
+  test(
+    'quality command waits for its terminal event and serializes requests',
+    () async {
+      final player = await preparedLadder();
+      var complete = false;
+      final first = player.setVideoQuality(32).then((_) => complete = true);
+      final second = player.setVideoQuality(null);
+      await Future<void>.delayed(Duration.zero);
+      final command = calls.last.arguments as Map;
+      expect(command['quality'], 32);
+      expect(calls.where((c) => c.method == 'videoControl').length, 1);
+      await emit({'event': 'quality', 'quality': 32, 'automaticVideo': false});
+      await emit({
+        'event': 'video_control',
+        'requestId': command['requestId'],
+        'success': true,
+        'automaticVideo': false,
+        'load': 99,
+      });
+      await emit({
+        'event': 'video_control',
+        'requestId': 999,
+        'success': true,
+        'automaticVideo': false,
+      });
+      expect(complete, false);
+      await emit({
+        'event': 'video_control',
+        'requestId': command['requestId'],
+        'success': true,
+        'automaticVideo': false,
+      });
+      await first;
+      await Future<void>.delayed(Duration.zero);
+      final next = calls.last.arguments as Map;
+      expect(next['automatic'], true);
+      expect(next['requestId'], isNot(command['requestId']));
+      await emit({
+        'event': 'video_control',
+        'requestId': next['requestId'],
+        'success': true,
+        'automaticVideo': true,
+      });
+      await second;
+      expect(player.automaticVideo, true);
+      await player.dispose();
+    },
+  );
+  test(
+    'quality cancellation fails the request without hiding actual quality',
+    () async {
+      final player = await preparedLadder();
+      final pending = player.setVideoQuality(32);
+      final failed = expectLater(pending, throwsA(isA<PlatformException>()));
+      await Future<void>.delayed(Duration.zero);
+      final request = (calls.last.arguments as Map)['requestId'];
+      await emit({'event': 'quality', 'quality': 120, 'automaticVideo': true});
+      await emit({
+        'event': 'video_control',
+        'requestId': request,
+        'success': false,
+        'automaticVideo': true,
+      });
+      await failed;
+      expect(player.videoQuality, 120);
+      expect(player.automaticVideo, true);
+      await expectLater(player.setVideoQuality(999), throwsArgumentError);
+      await player.dispose();
+    },
+  );
+  test('disposing cancels in-flight and queued quality commands', () async {
+    final player = await preparedLadder();
+    final first = expectLater(player.setVideoQuality(32), throwsStateError);
+    final second = expectLater(player.setVideoQuality(120), throwsStateError);
+    await Future<void>.delayed(Duration.zero);
+    await player.dispose();
+    await first;
+    await second;
+    expect(calls.where((c) => c.method == 'videoControl').length, 1);
+  });
+  test('terminal quality event may precede the method reply', () async {
+    final player = await preparedLadder();
+    messenger.setMockMethodCallHandler(commands, (call) async {
+      calls.add(call);
+      if (call.method == 'videoControl') {
+        await emit({
+          'event': 'video_control',
+          'requestId': (call.arguments as Map)['requestId'],
+          'success': true,
+          'automaticVideo': false,
+        });
+      }
+      return null;
+    });
+    await player.setVideoQuality(32);
+    expect(player.automaticVideo, false);
+    await player.dispose();
+  });
+  test(
+    'source replacement cancels quality request and ignores its late result',
+    () async {
+      final player = await preparedLadder();
+      final failed = expectLater(player.setVideoQuality(32), throwsStateError);
+      await Future<void>.delayed(Duration.zero);
+      final request = (calls.last.arguments as Map)['requestId'];
+      final ready = player.openSource(
+        ladderSource(),
+        userAgent: 'test',
+        referer: 'test',
+        audioOnly: false,
+      );
+      await failed;
+      await Future<void>.delayed(Duration.zero);
+      await emit({
+        'event': 'video_control',
+        'requestId': request,
+        'success': true,
+        'automaticVideo': false,
+      });
+      await emit({'event': 'prepared', 'load': 2});
+      await ready;
+      expect(player.videoQuality, null);
+      await player.dispose();
+    },
+  );
+
+  test(
+    'open and refresh preserve video ladder and independent lossless audio',
+    () async {
+      final player = await create();
+      final source = ladderSource(refresh: (_) async => ladderSource());
+      final ready = player.openSource(
+        source,
+        userAgent: 'test',
+        referer: 'test',
+        audioOnly: false,
+      );
+      await Future<void>.delayed(Duration.zero);
+      final opening =
+          calls.firstWhere((c) => c.method == 'open').arguments as Map;
+      expect(opening['automaticVideo'], true);
+      expect((opening['videoTracks'] as List).map((t) => t['id']), [120, 32]);
+      expect(opening['audioTrack']['id'], 30251);
+      expect(player.videoQuality, null);
+      expect(player.automaticVideo, false);
+      await emit({'event': 'prepared'});
+      await ready;
+      await emit({'event': 'resource_refresh', 'requestId': 301});
+      await Future<void>.delayed(Duration.zero);
+      final fresh =
+          calls.firstWhere((c) => c.method == 'resourceUpdate').arguments
+              as Map;
+      expect(fresh['automaticVideo'], true);
+      expect(fresh['videoTracks'], opening['videoTracks']);
+      expect(fresh['audioTrack'], opening['audioTrack']);
+      await player.dispose();
+    },
+  );
+  test(
+    'audio only excludes video ladder and keeps the requested audio track',
+    () async {
+      final player = await create();
+      final source = ladderSource();
+      final ready = player.openSource(
+        source,
+        userAgent: 'test',
+        referer: 'test',
+        audioOnly: true,
+      );
+      await Future<void>.delayed(Duration.zero);
+      final opening =
+          calls.firstWhere((c) => c.method == 'open').arguments as Map;
+      expect(opening.containsKey('videoTracks'), false);
+      expect(opening.containsKey('automaticVideo'), false);
+      expect(opening['sourceTrack']['id'], 30251);
+      await emit({'event': 'prepared'});
+      await ready;
+      await player.dispose();
+    },
+  );
+  test('quality follows native updates and ignores duplicate or replaced source events', () async {
+    final player = await create();
+    final seen = <(int, bool)>[];
+    final sub = player.qualityUpdates.listen(seen.add);
+    var ready = player.openSource(
+      ladderSource(),
+      userAgent: 'test',
+      referer: 'test',
+      audioOnly: false,
+    );
+    await Future<void>.delayed(Duration.zero);
+    await emit({
+      'event': 'quality',
+      'quality': 120,
+      'automaticVideo': true,
+      'load': 99,
+    });
+    expect(player.videoQuality, null);
+    await emit({'event': 'quality', 'quality': 80, 'automaticVideo': true});
+    await emit({'event': 'quality', 'quality': 80, 'automaticVideo': true});
+    await emit({'event': 'quality', 'quality': 32, 'automaticVideo': false});
+    expect(seen, [(80, true), (32, false)]);
+    await emit({'event': 'prepared'});
+    await ready;
+    ready = player.openSource(
+      ladderSource(),
+      userAgent: 'test',
+      referer: 'test',
+      audioOnly: false,
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(player.videoQuality, null);
+    await emit({'event': 'quality', 'quality': 80, 'automaticVideo': true});
+    expect(player.videoQuality, null);
+    await emit({
+      'event': 'quality',
+      'quality': 120,
+      'automaticVideo': false,
+      'load': 2,
+    });
+    expect(player.videoQuality, 120);
+    await emit({'event': 'prepared', 'load': 2});
+    await ready;
+    await sub.cancel();
+    await player.dispose();
+  });
   test('media preload hands off the session before real create and queued preloads yield', () async {
     final queued = Completer<void>();
     messenger.setMockMethodCallHandler(commands, (call) async {

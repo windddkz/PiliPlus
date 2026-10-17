@@ -13,6 +13,24 @@ class OfficialPlayer extends PlatformPlayer {
 
   final _rateUpdates = StreamController<double>.broadcast();
   Stream<double> get rateUpdates => _rateUpdates.stream;
+  final _qualityUpdates = StreamController<(int, bool)>.broadcast();
+  Stream<(int, bool)> get qualityUpdates => _qualityUpdates.stream;
+  int? videoQuality;
+  bool automaticVideo = false;
+  Future<void> _videoControlTail = Future<void>.value();
+  Completer<void>? _videoControlResult;
+  int _videoControlSerial = 0;
+  int? _videoControlRequest;
+  bool _videoControlAutomatic = false;
+  bool _videoControlUncertain = false;
+
+  void _acceptQuality(dynamic quality, dynamic automatic) {
+    if (quality is! int || quality <= 0 || automatic is! bool) return;
+    if (videoQuality == quality && automaticVideo == automatic) return;
+    videoQuality = quality;
+    automaticVideo = automatic;
+    _qualityUpdates.add((quality, automatic));
+  }
 
   OfficialPlayer._(this.fallback)
     : super(configuration: const PlayerConfiguration());
@@ -268,6 +286,13 @@ class OfficialPlayer extends PlatformPlayer {
           : source.videoTrack?.forSource(source.videoSource),
       if (!audioOnly)
         'audioTrack': source.audioTrack?.forSource(source.audioSource),
+      if (!audioOnly &&
+          (source.videoTracks.isNotEmpty || source.automaticVideo)) ...{
+        'videoTracks': [
+          for (final track in source.videoTracks) track.forSource(track.source),
+        ],
+        'automaticVideo': source.automaticVideo,
+      },
     },
   };
 
@@ -307,11 +332,16 @@ class OfficialPlayer extends PlatformPlayer {
         'Live playback requires one network source without seeking',
       );
     }
+    _cancelVideoControl(StateError('Source changed during quality switch'));
+    _videoControlTail = Future<void>.value();
+    _videoControlUncertain = false;
     var load = ++_load;
     _onFirstVideoFrame = audioOnly ? null : onFirstVideoFrame;
     _isLive = isLive;
     final original = source;
     _networkSource = source is NetworkSource ? source : null;
+    videoQuality = null;
+    automaticVideo = false;
     _audioOnly = audioOnly;
     _refreshRequest = null;
     _lastRefreshRequest = 0;
@@ -411,6 +441,26 @@ class OfficialPlayer extends PlatformPlayer {
     if (raw.containsKey('load') && raw['load'] != _load) return;
     final event = Map<String, dynamic>.from(raw);
     switch (event['event']) {
+      case 'video_control':
+        final pending = _videoControlResult;
+        if (pending == null ||
+            pending.isCompleted ||
+            event['requestId'] != _videoControlRequest ||
+            event['success'] is! bool ||
+            event['automaticVideo'] is! bool) {
+          return;
+        }
+        if (event['success'] == true &&
+            event['automaticVideo'] == _videoControlAutomatic) {
+          automaticVideo = _videoControlAutomatic;
+          pending.complete();
+        } else {
+          pending.completeError(
+            PlatformException(code: 'official_video_switch_failed'),
+          );
+        }
+      case 'quality':
+        _acceptQuality(event['quality'], event['automaticVideo']);
       case 'first_video_frame':
         if (_disposing != null || _dead || event['load'] != _load) return;
         final callback = _onFirstVideoFrame;
@@ -445,6 +495,7 @@ class OfficialPlayer extends PlatformPlayer {
         bufferingController.add(false);
         final error = PlatformException(code: 'resource_unavailable');
         _cancelSeek(error);
+        _cancelVideoControl(error);
         if (_preparing case final pending? when !pending.isCompleted) {
           pending.completeError(error);
         } else {
@@ -460,6 +511,7 @@ class OfficialPlayer extends PlatformPlayer {
         final code = event['error'] as String? ?? 'native_error';
         _nativePrepared = false;
         _cancelSeek(PlatformException(code: code));
+        _cancelVideoControl(PlatformException(code: code));
         _dead = code == 'native_process_died' || code == 'binding_died';
         processReclaimed =
             code == 'native_process_died' &&
@@ -553,6 +605,7 @@ class OfficialPlayer extends PlatformPlayer {
           sampleRate: (event['sampleRate'] as num?)?.toInt(),
           channels: event['channelLayout'] as String?,
         );
+        _acceptQuality(event['videoQuality'], event['automaticVideo']);
         audioCodec = event['audioCodec'] as String? ?? '';
         loudnessState = event['loudnessState'] as String? ?? 'disabled';
         requestedAudioFilter = event['requestedAudioFilter'] as String? ?? '';
@@ -707,6 +760,79 @@ class OfficialPlayer extends PlatformPlayer {
     }
   }
 
+  /// Null enables native automatic quality; a fixed target waits for its terminal callback.
+  Future<void> setVideoQuality(int? quality) {
+    final load = _load;
+    final result = _videoControlTail.then(
+      (_) => _setVideoQuality(quality, load),
+    );
+    _videoControlTail = result.catchError((Object _) {});
+    return result;
+  }
+
+  Future<void> _setVideoQuality(int? quality, int load) async {
+    final source = _networkSource;
+    if (_disposed ||
+        _disposing != null ||
+        _dead ||
+        load != _load ||
+        !_nativePrepared ||
+        _preparing != null ||
+        _isLive ||
+        _audioOnly ||
+        source == null ||
+        source.videoTracks.isEmpty) {
+      throw StateError('Quality control requires the current prepared ladder');
+    }
+    if (_videoControlUncertain) {
+      throw PlatformException(code: 'official_video_switch_result_unavailable');
+    }
+    if (quality != null &&
+        !source.videoTracks.any((track) => track.id == quality)) {
+      throw ArgumentError.value(quality, 'quality');
+    }
+    final pending = _videoControlResult = Completer<void>();
+    final request = _videoControlRequest = ++_videoControlSerial;
+    _videoControlAutomatic = quality == null;
+    unawaited(pending.future.catchError((Object _) {}));
+    try {
+      try {
+        await _send('videoControl', {
+          'load': load,
+          'requestId': request,
+          'quality': quality ?? 0,
+          'automatic': quality == null,
+        });
+      } catch (_) {
+        // A lost reply cannot prove that native did not accept the command.
+        if (load == _load && !pending.isCompleted) {
+          _videoControlUncertain = true;
+        }
+        rethrow;
+      }
+      await pending.future.timeout(
+        const Duration(seconds: 20),
+        onTimeout: () {
+          if (load == _load) _videoControlUncertain = true;
+          throw PlatformException(
+            code: 'official_video_switch_result_unavailable',
+          );
+        },
+      );
+    } finally {
+      if (identical(_videoControlResult, pending)) {
+        _videoControlResult = null;
+        _videoControlRequest = null;
+      }
+    }
+  }
+
+  void _cancelVideoControl(Object error) {
+    if (_videoControlResult case final pending? when !pending.isCompleted) {
+      pending.completeError(error);
+    }
+  }
+
   @override
   Future<void> setRate(double rate) async {
     if (!supportsRate(rate)) {
@@ -760,6 +886,7 @@ class OfficialPlayer extends PlatformPlayer {
 
   Future<void> _closeStreams() async {
     await _rateUpdates.close();
+    await _qualityUpdates.close();
     await super.dispose();
   }
 
@@ -770,6 +897,7 @@ class OfficialPlayer extends PlatformPlayer {
     final disposal = _disposing = _dispose()
         .then((_) async {
           await _rateUpdates.close();
+          await _qualityUpdates.close();
           await super.dispose();
           _stoppingPlayers.remove(this);
           _livePlayers.remove(this);
@@ -786,6 +914,7 @@ class OfficialPlayer extends PlatformPlayer {
   Future<void> _dispose() async {
     _onFirstVideoFrame = null;
     _cancelSeek(StateError('Playback disposed during seek'));
+    _cancelVideoControl(StateError('Playback disposed during quality switch'));
     if (!_dead) {
       try {
         await _send('dispose');

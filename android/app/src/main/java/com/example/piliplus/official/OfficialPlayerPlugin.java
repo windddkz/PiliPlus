@@ -260,6 +260,15 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                 data.putBoolean("available",Boolean.TRUE.equals(call.argument("available")));
                 if(data.getBoolean("available"))putSources(call,data);
                 break;
+            case "videoControl":
+                if(!(call.argument("automatic") instanceof Boolean) || !(call.argument("quality") instanceof Integer)
+                        || !(call.argument("requestId") instanceof Integer || call.argument("requestId") instanceof Long)) {
+                    result.error("invalid_video_control","Invalid quality control",null);return;
+                }
+                data.putLong("load",number(call,"load",-1).longValue());
+                data.putLong("requestId",number(call,"requestId",-1).longValue());
+                data.putInt("quality",(Integer)call.argument("quality"));
+                data.putBoolean("automatic",(Boolean)call.argument("automatic"));break;
             case "seek": data.putLong("position", number(call, "position", -1).longValue()); break;
             case "speed": data.putFloat("speed", number(call, "speed", Float.NaN).floatValue()); break;
             case "volume": data.putFloat("volume", number(call, "volume", Float.NaN).floatValue()); break;
@@ -290,20 +299,41 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
         if(call.method.equals("open"))data.putBoolean("awaitOutput",surface==null || !surface.isValid());
         send(call.method, data, result, null);
     }
+    private static Bundle streamBundle(OfficialStream track) {
+        Bundle info=new Bundle();info.putString("source",track.source);info.putInt("id",track.id);
+        info.putString("codecs",track.codecs);info.putInt("bandwidth",track.bandwidth);info.putStringArrayList("backups",new ArrayList<>(track.backups));
+        return info;
+    }
+    private static OfficialStream inputStream(Object raw,String actual) {
+        if(!(raw instanceof Map<?,?>))throw new IllegalArgumentException("Invalid stream metadata");
+        Map<?,?> fields=(Map<?,?>)raw;
+        return new OfficialStream(actual,fields.get("source"),fields.get("id"),fields.get("bandwidth"),fields.get("backups"),fields.get("codecs"));
+    }
     private static void putSources(MethodCall call,Bundle data) {
-                for (String key : new String[]{"source", "audio", "userAgent", "referer"}) {
-                    String value = call.argument(key); if (value != null) data.putString(key, value);
-                }
-                for(String key:new String[]{"sourceTrack","audioTrack"}) {
-                    Object raw=call.argument(key);if(raw==null)continue;
-                    if(!(raw instanceof Map<?,?>))throw new IllegalArgumentException("Invalid stream metadata");
-                    Map<?,?> fields=(Map<?,?>)raw;
-                    OfficialStream track=new OfficialStream(data.getString(key.equals("sourceTrack")?"source":"audio"),
-                        fields.get("source"),fields.get("id"),fields.get("bandwidth"),fields.get("backups"),fields.get("codecs"));
-                    Bundle info=new Bundle();info.putString("source",track.source);info.putInt("id",track.id);
-                    info.putString("codecs",track.codecs);info.putInt("bandwidth",track.bandwidth);info.putStringArrayList("backups",new ArrayList<>(track.backups));
-                    data.putBundle(key,info);
-                }
+        for(String key:new String[]{"source","audio","userAgent","referer"}) {
+            String value=call.argument(key);if(value!=null)data.putString(key,value);
+        }
+        OfficialStream video=null;
+        for(String key:new String[]{"sourceTrack","audioTrack"}) {
+            Object raw=call.argument(key);if(raw==null)continue;
+            OfficialStream track=inputStream(raw,data.getString(key.equals("sourceTrack")?"source":"audio"));
+            data.putBundle(key,streamBundle(track));if(key.equals("sourceTrack"))video=track;
+        }
+        Object raw=call.argument("videoTracks"),mode=call.argument("automaticVideo");
+        if(mode!=null && !(mode instanceof Boolean))throw new IllegalArgumentException("Invalid video policy");
+        if(raw==null) {
+            if(Boolean.TRUE.equals(mode))throw new IllegalArgumentException("Automatic video requires a ladder");
+            return;
+        }
+        if(!(raw instanceof List<?>) || ((List<?>)raw).size()>20)throw new IllegalArgumentException("Invalid video ladder");
+        List<OfficialStream> tracks=new ArrayList<>();
+        for(Object value:(List<?>)raw) {
+            Object source=value instanceof Map<?,?>?((Map<?,?>)value).get("source"):null;
+            tracks.add(inputStream(value,source instanceof String?(String)source:null));
+        }
+        OfficialVideoTracks policy=new OfficialVideoTracks(video,tracks,Boolean.TRUE.equals(mode));
+        ArrayList<Bundle> values=new ArrayList<>();for(OfficialStream track:policy.tracks)values.add(streamBundle(track));
+        data.putParcelableArrayList("videoTracks",values);data.putBoolean("automaticVideo",policy.automatic);
     }
     // Map.of requires API 30; this bridge supports Android 26 and above.
     private static Map<String, Object> values(Object... entries) {

@@ -15,6 +15,8 @@ class NetworkSource extends DataSource {
   final String? officialPreloadToken;
   final DashTrack? videoTrack;
   final DashTrack? audioTrack;
+  final List<DashTrack> videoTracks;
+  final bool automaticVideo;
   final Future<NetworkSource?> Function(NetworkSource source)? refresh;
   final void Function(NetworkSource previous, NetworkSource next)? onRefreshed;
 
@@ -24,9 +26,11 @@ class NetworkSource extends DataSource {
     this.officialPreloadToken,
     this.videoTrack,
     this.audioTrack,
+    Iterable<DashTrack> videoTracks = const [],
+    this.automaticVideo = false,
     this.refresh,
     this.onRefreshed,
-  });
+  }) : videoTracks = List.unmodifiable(videoTracks);
 }
 
 class DashTrack {

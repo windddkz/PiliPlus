@@ -126,17 +126,22 @@ abstract final class VideoHttp {
       final audioUrl = VideoUtils.getCdnUrl(audio.playUrls, isAudio: true);
       final token = response.officialPreloadToken ??=
           '${DateTime.now().microsecondsSinceEpoch}_${++_preloadSerial}';
+      response.officialPreloadVideos ??= List.unmodifiable(
+        response.dash!.video!,
+      );
+      final videoTrack = DashTrack(
+        source: videoUrl,
+        id: selected.video.id,
+        bandwidth: selected.video.bandWidth,
+        codecs: selected.video.codecs,
+        urls: selected.video.playUrls,
+      );
       final source = NetworkSource(
         videoSource: videoUrl,
         audioSource: audioUrl,
         officialPreloadToken: token,
-        videoTrack: DashTrack(
-          source: videoUrl,
-          id: selected.video.id,
-          bandwidth: selected.video.bandWidth,
-          codecs: selected.video.codecs,
-          urls: selected.video.playUrls,
-        ),
+        videoTrack: videoTrack,
+        videoTracks: DashSelection.videoLadder(response, videoTrack),
         audioTrack: DashTrack(
           source: audioUrl,
           id: audio.id,

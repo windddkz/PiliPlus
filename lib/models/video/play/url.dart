@@ -44,6 +44,7 @@ class PlayUrlModel {
   Volume? volume;
   // Local-only identity; never accepted from the server response.
   String? officialPreloadToken;
+  List<VideoItem>? officialPreloadVideos;
 
   late int _lastPlayTime;
   int get lastPlayTime => _lastPlayTime;
