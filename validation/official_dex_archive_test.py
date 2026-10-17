@@ -1,4 +1,5 @@
 """Validate the packaged code archive against the hash-locked official input."""
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -9,7 +10,9 @@ repo = Path(__file__).resolve().parents[1]
 source = json.loads((repo/'android/official-runtime-manifest.json').read_text())
 assets = repo/'android/app/src/officialAudio/assets/official_runtime'
 manifest = json.loads((assets/'runtime-manifest.json').read_text())
-original = repo.parent/source['apk_path']
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--apk', type=Path, default=repo.parent/source['apk_path'])
+original = parser.parse_args().apk
 assert hashlib.sha256(original.read_bytes()).hexdigest() == source['apk_sha256']
 assert len(manifest['files']) == 9 and len(manifest['owned']) == 3
 assert list(manifest['code']) == ['official.apk']
