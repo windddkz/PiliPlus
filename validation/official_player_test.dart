@@ -946,6 +946,43 @@ void main() {
     },
   );
 
+  test(
+    'rate capability matches native commands and failed rates retain state',
+    () async {
+      final player = await create();
+      for (final rate in [.25, .5, 1.25, 1.5, 1.75, 2.0, 3.0, 4.0]) {
+        expect(OfficialPlayer.supportsRate(rate), true);
+        await player.setRate(rate);
+        expect((calls.last.arguments as Map)['speed'], rate);
+        expect(player.state.rate, rate);
+      }
+      final before = calls.length;
+      for (final rate in [
+        double.nan,
+        double.infinity,
+        0.0,
+        -.5,
+        .24,
+        4.01,
+        6.0,
+      ]) {
+        expect(OfficialPlayer.supportsRate(rate), false);
+        await expectLater(player.setRate(rate), throwsArgumentError);
+      }
+      expect(calls.length, before);
+      expect(player.state.rate, 4.0);
+      messenger.setMockMethodCallHandler(commands, (call) async {
+        if (call.method == 'speed') {
+          throw PlatformException(code: 'speed_failed');
+        }
+        return null;
+      });
+      await expectLater(player.setRate(1.0), throwsA(isA<PlatformException>()));
+      expect(player.state.rate, 4.0);
+      await player.dispose();
+    },
+  );
+
   test('dispose is idempotent and waits for confirmed native close', () async {
     final closed = Completer<void>();
     messenger.setMockMethodCallHandler(commands, (call) async {

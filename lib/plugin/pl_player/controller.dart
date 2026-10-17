@@ -227,7 +227,7 @@ class PlPlayerController
 
   int _playerCount = 0;
 
-  late double lastPlaybackSpeed = 1.0;
+  double? _longPressRestoreSpeed;
   final RxDouble _playbackSpeed = Pref.playSpeedDefault.obs;
   late final RxDouble _longPressSpeed = Pref.longPressSpeedDefault.obs;
 
@@ -1295,11 +1295,20 @@ class PlPlayerController
   // 开始播放
   Future<void> _initializePlayer(int revision) async {
     if (!_currentSource(revision)) return;
+    if (_longPressRestoreSpeed case final speed?) {
+      _playbackSpeed.value = speed;
+      _longPressRestoreSpeed = null;
+      longPressStatus.value = false;
+    }
     // 设置倍速
     if (_videoPlayerController != null) {
       final speed = isLive ? 1.0 : playbackSpeed;
       if (_videoPlayerController!.state.rate != speed) {
-        await setPlaybackSpeed(speed);
+        if (!await setPlaybackSpeed(speed) &&
+            _currentSource(revision) &&
+            _videoPlayerController != null) {
+          _playbackSpeed.value = _videoPlayerController!.state.rate;
+        }
       }
     }
     if (!_currentSource(revision)) return;
@@ -1581,12 +1590,28 @@ class PlPlayerController
   }
 
   /// 设置倍速
-  Future<void> setPlaybackSpeed(double speed) async {
-    lastPlaybackSpeed = playbackSpeed;
+  bool supportsPlaybackSpeed(double speed) =>
+      speed.isFinite &&
+      speed > 0 &&
+      (_videoPlayerController is! OfficialPlayer ||
+          OfficialPlayer.supportsRate(speed));
 
-    if (speed == _videoPlayerController?.state.rate) return;
-
-    await _videoPlayerController?.setRate(speed);
+  Future<bool> setPlaybackSpeed(double speed) async {
+    final player = _videoPlayerController;
+    if (player == null) return false;
+    if (!supportsPlaybackSpeed(speed)) {
+      SmartDialog.showToast(
+        player is OfficialPlayer ? '官方内核当前支持 0.25～4 倍速' : '倍速必须是大于 0 的有效数值',
+      );
+      return false;
+    }
+    try {
+      if (speed != player.state.rate) await player.setRate(speed);
+    } catch (_) {
+      SmartDialog.showToast('切换倍速失败，已保留当前倍速');
+      return false;
+    }
+    if (!identical(player, _videoPlayerController)) return false;
     if (!isLive) _playbackSpeed.value = speed;
     _updatePlaybackState();
     if (danmakuController != null) {
@@ -1599,6 +1624,7 @@ class PlPlayerController
         );
       } catch (_) {}
     }
+    return true;
   }
 
   /// 播放视频
@@ -1728,29 +1754,32 @@ class PlPlayerController
   }
 
   /// 设置长按倍速状态 live模式下禁用
-  Future<void> setLongPressStatus(bool val) async {
-    if (isLive) {
-      return;
-    }
-    if (controlsLock.value) {
-      return;
-    }
-    if (longPressStatus.value == val) {
-      return;
-    }
-    if (val) {
-      if (playerStatus.isPlaying) {
-        longPressStatus.value = val;
-        HapticFeedback.lightImpact();
-        await setPlaybackSpeed(
-          enableAutoLongPressSpeed ? playbackSpeed * 2 : longPressSpeed,
-        );
+  Future<void> setLongPressStatus(bool val) {
+    final revision = _sourceRevision;
+    // A release must run after the pending acceleration has acknowledged its rate.
+    return _enqueuePlayer(() async {
+      if (!_currentSource(revision) || isLive || (val && controlsLock.value)) {
+        return;
       }
-    } else {
-      // if (kDebugMode) debugPrint('$playbackSpeed');
-      longPressStatus.value = val;
-      await setPlaybackSpeed(lastPlaybackSpeed);
-    }
+      if (longPressStatus.value == val) return;
+      if (val) {
+        if (playerStatus.isPlaying) {
+          final restoreSpeed = playbackSpeed;
+          if (await setPlaybackSpeed(
+            enableAutoLongPressSpeed ? restoreSpeed * 2 : longPressSpeed,
+          )) {
+            _longPressRestoreSpeed = restoreSpeed;
+            longPressStatus.value = true;
+            HapticFeedback.lightImpact();
+          }
+        }
+      } else {
+        final restoreSpeed = _longPressRestoreSpeed;
+        _longPressRestoreSpeed = null;
+        longPressStatus.value = false;
+        if (restoreSpeed != null) await setPlaybackSpeed(restoreSpeed);
+      }
+    });
   }
 
   bool get isCompleted =>

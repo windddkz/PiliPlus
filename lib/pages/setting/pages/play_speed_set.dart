@@ -91,7 +91,9 @@ class _PlaySpeedPageState extends State<PlaySpeedPage> {
             onPressed: () {
               try {
                 final val = double.parse(initialValue);
-                if (speedList.contains(val)) {
+                if (!val.isFinite || val <= 0) {
+                  SmartDialog.showToast('倍速必须是大于 0 的有效数值');
+                } else if (speedList.contains(val)) {
                   SmartDialog.showToast('该倍速已存在');
                 } else {
                   Get.back();

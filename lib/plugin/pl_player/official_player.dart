@@ -8,6 +8,9 @@ import 'package:media_kit/media_kit.dart';
 
 /// The Android process owns audio, video and their clock; Dart only sends controls.
 class OfficialPlayer extends PlatformPlayer {
+  static bool supportsRate(double rate) =>
+      rate.isFinite && rate >= .25 && rate <= 4;
+
   OfficialPlayer._(this.fallback)
     : super(configuration: const PlayerConfiguration());
 
@@ -600,7 +603,7 @@ class OfficialPlayer extends PlatformPlayer {
 
   @override
   Future<void> setRate(double rate) async {
-    if (!rate.isFinite || rate < .25 || rate > 4) {
+    if (!supportsRate(rate)) {
       throw ArgumentError.value(rate, 'rate');
     }
     await _send('speed', {'speed': rate});
