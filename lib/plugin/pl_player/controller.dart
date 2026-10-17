@@ -1495,6 +1495,15 @@ class PlPlayerController
       ///completed
       stream.completed.listen((bool completed) {
         if (completed) {
+          if (!_processing && identical(player, _videoPlayerController)) {
+            if (dataSource case NetworkSource(:final officialPreloadToken)) {
+              VideoHttp.rememberPlaybackPosition(
+                officialPreloadToken,
+                Duration.zero,
+                completed: true,
+              );
+            }
+          }
           unawaited(audioSessionHandler?.release(this));
           playerStatus = .completed;
           _startWakeLockTimer();
@@ -1509,6 +1518,15 @@ class PlPlayerController
 
       /// position
       stream.position.listen((Duration position) {
+        if (!_processing && identical(player, _videoPlayerController)) {
+          if (dataSource case NetworkSource(:final officialPreloadToken)) {
+            VideoHttp.rememberPlaybackPosition(
+              officialPreloadToken,
+              position,
+              completed: player.state.completed,
+            );
+          }
+        }
         final posInSeconds = position.inSeconds;
 
         if (posInSeconds != this.position.value) {

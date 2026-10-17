@@ -8,6 +8,7 @@ import 'package:PiliPlus/common/widgets/loading_widget/http_error.dart';
 import 'package:PiliPlus/common/widgets/route_aware_mixin.dart';
 import 'package:PiliPlus/common/widgets/video_card/video_card_v.dart';
 import 'package:PiliPlus/http/loading_state.dart';
+import 'package:PiliPlus/http/preload_queue.dart';
 import 'package:PiliPlus/http/video.dart';
 import 'package:PiliPlus/models/model_rec_video_item.dart';
 import 'package:PiliPlus/pages/home/controller.dart';
@@ -64,7 +65,10 @@ class _RcmdPageState extends State<RcmdPage>
 
   void _retainPrefetch() {
     final items = _prefetchList;
-    if (items == null || !_canPrefetch) return;
+    if (items == null || !_canPrefetch) {
+      VideoHttp.preloadQueue.pause(this);
+      return;
+    }
     if (_prefetching) {
       _prefetchAgain = true;
       return;
@@ -85,12 +89,20 @@ class _RcmdPageState extends State<RcmdPage>
   void didPopNext() => _retainPrefetch();
 
   @override
+  void didPushNext() => VideoHttp.preloadQueue.pause(this);
+
+  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _retainPrefetch();
+    if (state == AppLifecycleState.resumed) {
+      _retainPrefetch();
+    } else {
+      VideoHttp.preloadQueue.pause(this);
+    }
   }
 
   @override
   void dispose() {
+    VideoHttp.preloadQueue.pause(this);
     _prefetchTimer?.cancel();
     _scrollPrefetchTimer?.cancel();
     controller.scrollController.removeListener(_schedulePrefetch);
@@ -118,38 +130,39 @@ class _RcmdPageState extends State<RcmdPage>
     if (!_canPrefetch) return;
     final revision = _prefetchRevision;
     final network = await Connectivity().checkConnectivity();
-    if (!network.contains(ConnectivityResult.wifi) || !_canPrefetch) return;
+    if (!network.contains(ConnectivityResult.wifi) || !_canPrefetch) {
+      VideoHttp.preloadQueue.pause(this);
+      return;
+    }
     final layout = gridDelegate.layoutCache;
     if (layout == null) return;
     final position = controller.scrollController.position;
-    var count = 0;
-    for (final index in visibleFeedIndices(
+    final visible = visibleFeedIndices(
       layout,
       position.pixels - Style.cardSpace,
-      position.viewportDimension,
+      position.viewportDimension * 2,
       items.length,
       controller.lastRefreshAt,
-    )) {
-      if (!_canPrefetch ||
-          revision != _prefetchRevision ||
-          !identical(items, _prefetchList) ||
-          index >= items.length) {
+    );
+    final ordered = <int>{...visible, ...Iterable.generate(items.length)};
+    final candidates = <PreloadCandidate>[];
+    for (final index in ordered) {
+      if (revision != _prefetchRevision || !identical(items, _prefetchList)) {
         return;
       }
       final item = items[index];
-      if (item is! BaseRcmdVideoItemModel ||
-          item.goto != 'av' ||
-          item.cid == null ||
-          item.cid! <= 0 ||
-          (item.bvid == null && item.aid == null)) {
-        continue;
+      if (item is BaseRcmdVideoItemModel &&
+          item.goto == 'av' &&
+          item.cid != null &&
+          item.cid! > 0 &&
+          (item.bvid != null || item.aid != null)) {
+        candidates.add((
+          bvid: item.bvid ?? IdUtils.av2bv(item.aid!),
+          cid: item.cid!,
+        ));
       }
-      await VideoHttp.prefetchVideoUrl(
-        item.bvid ?? IdUtils.av2bv(item.aid!),
-        item.cid!,
-      );
-      if (++count == 3) return;
     }
+    VideoHttp.preloadQueue.refill(this, candidates);
   }
 
   @override

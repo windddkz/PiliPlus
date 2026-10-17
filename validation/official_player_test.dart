@@ -871,7 +871,7 @@ void main() {
   test('media preload does not steal an active player', () async {
     final player = await create();
     await preload();
-    expect(calls.map((c) => c.method), ['availability', 'create']);
+    expect(calls.map((c) => c.method), ['availability', 'create', 'preload']);
     await player.dispose();
   });
   test(

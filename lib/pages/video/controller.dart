@@ -1141,18 +1141,20 @@ class VideoDetailController extends GetxController
       _codecCellular = !isWiFi;
     }
 
-    final prefetched =
-        !fromReset &&
-            (_actualVideoType ?? videoType) == VideoType.ugc &&
-            epId == null &&
-            seasonId == null &&
-            currLang.value == null
-        ? await VideoHttp.takePrefetchedVideoUrl((
-            bvid: bvid,
-            cid: cid.value,
-            tryLook: plPlayerController.tryLook,
-            voiceBalance: plPlayerController.requestLoudnessMetadata,
-          ))
+    final playbackAccount = Accounts.video;
+    final cacheable =
+        (_actualVideoType ?? videoType) == VideoType.ugc &&
+        epId == null &&
+        seasonId == null &&
+        currLang.value == null;
+    final cacheKey = (
+      bvid: bvid,
+      cid: cid.value,
+      tryLook: plPlayerController.tryLook,
+      voiceBalance: plPlayerController.requestLoudnessMetadata,
+    );
+    final prefetched = !fromReset && cacheable
+        ? await VideoHttp.takePrefetchedVideoUrl(cacheKey)
         : null;
     if (!_isCurrentVideoUrl(request)) return;
     final result = prefetched == null
@@ -1161,6 +1163,9 @@ class VideoDetailController extends GetxController
     if (!_isCurrentVideoUrl(request)) return;
 
     if (result case Success(:final response)) {
+      if (cacheable && prefetched == null) {
+        VideoHttp.rememberPlaybackResponse(playbackAccount, cacheKey, response);
+      }
       // Keep all response mutations local until this request is still current.
       if (response.dash != null) await _supplementVideoQualities(response);
       if (response.dash != null &&

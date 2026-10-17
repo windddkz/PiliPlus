@@ -12,6 +12,7 @@ import 'package:PiliPlus/http/init.dart';
 import 'package:PiliPlus/http/loading_state.dart';
 import 'package:PiliPlus/http/login.dart';
 import 'package:PiliPlus/http/play_url_prefetch.dart';
+import 'package:PiliPlus/http/preload_queue.dart';
 import 'package:PiliPlus/models/common/account_type.dart';
 import 'package:PiliPlus/models/common/video/video_type.dart';
 import 'package:PiliPlus/models/common/video/video_quality.dart';
@@ -23,7 +24,6 @@ import 'package:PiliPlus/models/video/play/url.dart';
 import 'package:PiliPlus/models/video/play/selection.dart';
 import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
 import 'package:PiliPlus/plugin/pl_player/official_player.dart';
-import 'package:PiliPlus/utils/connectivity_utils.dart';
 import 'package:PiliPlus/utils/video_utils.dart';
 import 'package:PiliPlus/models_new/pgc/pgc_rank/pgc_rank_item_model.dart';
 import 'package:PiliPlus/models_new/popular/popular_precious/data.dart';
@@ -51,19 +51,36 @@ import 'package:PiliPlus/utils/subtitle_utils.dart';
 import 'package:PiliPlus/utils/utils.dart';
 import 'package:PiliPlus/utils/wbi_sign.dart';
 import 'package:dio/dio.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart' show compute, debugPrint, kDebugMode;
 import 'package:protobuf/protobuf.dart';
 
 /// view层根据 status 判断渲染逻辑
 abstract final class VideoHttp {
-  static final _prefetch = PlayUrlPrefetch();
-  static int _preloadSerial = 0;
+  static final _prefetch = PlayUrlPrefetch(
+    onAccountChanged: OfficialPlayer.invalidatePreloads,
+  );
+  static final preloadQueue = PreloadQueue(
+    load: (item) => prefetchVideoUrl(item.bvid, item.cid),
+    enable: OfficialPlayer.enablePreloads,
+  );
 
   static bool get prefetchEnabled =>
       Platform.isAndroid && Pref.officialAudioBackend && Pref.preInitPlayer;
 
-  static Future<void> prefetchVideoUrl(String bvid, int cid) async {
-    if (!prefetchEnabled) return;
+  static Future<bool> _preloadWiFi() async {
+    try {
+      return (await Connectivity().checkConnectivity()).contains(
+        ConnectivityResult.wifi,
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<String> prefetchVideoUrl(String bvid, int cid) async {
+    if (!prefetchEnabled) return 'disabled';
+    if (!await _preloadWiFi() || !prefetchEnabled) return 'retry';
     final account = Accounts.video;
     final key = (
       bvid: bvid,
@@ -74,9 +91,9 @@ abstract final class VideoHttp {
           const {'normal', 'high_dynamic'}.contains(Pref.officialLoudnessMode),
     );
     final retained = await _prefetch.retain(account, key);
+    if (!identical(account, Accounts.video)) return 'retry';
     if (retained != null) {
-      await _preloadMedia(retained, account);
-      return;
+      return _preloadMedia(retained, account);
     }
     await _prefetch.preload(account, key, () async {
       final cancel = CancelToken();
@@ -98,27 +115,30 @@ abstract final class VideoHttp {
                 return const Error('prefetch expired');
               },
             );
-        if (result case Success(:final response)) {
-          unawaited(_preloadMedia(response, account));
-        }
         return result;
       } finally {
         cancel.cancel('prefetch finished');
       }
     });
+    final cached = await _prefetch.retain(account, key);
+    return cached == null ? 'retry' : _preloadMedia(cached, account);
   }
 
-  static Future<void> _preloadMedia(
+  static Future<String> _preloadMedia(
     PlayUrlModel response,
     Account account,
   ) async {
     try {
-      if (!prefetchEnabled || !identical(account, Accounts.video)) return;
+      if (!prefetchEnabled || !identical(account, Accounts.video)) {
+        return 'retry';
+      }
       if (Pref.officialCodecDefault() &&
           OfficialPlayer.preferredVideoCodecs == null) {
         await OfficialPlayer.warmUpWhenIdle();
       }
-      if (!prefetchEnabled || !identical(account, Accounts.video)) return;
+      if (!prefetchEnabled || !identical(account, Accounts.video)) {
+        return 'retry';
+      }
       final selected = DashSelection.select(
         response,
         videoQuality: Pref.defaultVideoQa,
@@ -126,11 +146,11 @@ abstract final class VideoHttp {
         preferredCodecs: Pref.playbackCodecs(),
       );
       final audio = selected.audio;
-      if (audio == null) return;
+      if (audio == null) return 'retry';
       final videoUrl = VideoUtils.getCdnUrl(selected.video.playUrls);
       final audioUrl = VideoUtils.getCdnUrl(audio.playUrls, isAudio: true);
-      final token = response.officialPreloadToken ??=
-          '${DateTime.now().microsecondsSinceEpoch}_${++_preloadSerial}';
+      final token = response.officialPreloadToken;
+      if (token == null) return 'retry';
       response.officialPreloadVideos ??= List.unmodifiable(
         response.dash!.video!,
       );
@@ -157,12 +177,12 @@ abstract final class VideoHttp {
           urls: audio.playUrls,
         ),
       );
-      if (!await ConnectivityUtils.isWiFi ||
+      if (!await _preloadWiFi() ||
           !prefetchEnabled ||
           !identical(account, Accounts.video)) {
-        return;
+        return 'retry';
       }
-      await OfficialPlayer.preloadWhenIdle(
+      return await OfficialPlayer.preloadWhenIdle(
         source,
         position: Duration(milliseconds: response.lastPlayTime),
         userAgent: BrowserUa.pc,
@@ -174,6 +194,7 @@ abstract final class VideoHttp {
         debugPrint('Official media preload skipped: ${error.runtimeType}');
       }
     }
+    return 'retry';
   }
 
   static Future<PlayUrlModel?> takePrefetchedVideoUrl(PlayUrlKey key) async {
@@ -182,9 +203,34 @@ abstract final class VideoHttp {
     final response = await _prefetch.take(account, key);
     if (!identical(account, Accounts.video) || !prefetchEnabled) return null;
     if (response != null && kDebugMode) {
-      debugPrint('PlayUrlPrefetch: consumed response');
+      debugPrint('PlayUrlPrefetch: reused response snapshot');
     }
     return response;
+  }
+
+  static void rememberPlaybackResponse(
+    Account account,
+    PlayUrlKey key,
+    PlayUrlModel response,
+  ) {
+    if (prefetchEnabled && identical(account, Accounts.video)) {
+      _prefetch.remember(account, key, response);
+    }
+  }
+
+  static void rememberPlaybackPosition(
+    String? token,
+    Duration position, {
+    bool completed = false,
+  }) {
+    if (prefetchEnabled && token != null) {
+      _prefetch.recordPosition(
+        Accounts.video,
+        token,
+        position.inMilliseconds,
+        completed: completed,
+      );
+    }
   }
 
   static RegExp zoneRegExp = RegExp(Pref.banWordForZone, caseSensitive: false);
@@ -452,7 +498,10 @@ abstract final class VideoHttp {
         late PlayUrlModel data;
         switch (videoType) {
           case .ugc:
-            data = PlayUrlModel.fromJson(res.data['data']);
+            data = PlayUrlModel.fromJson(
+              res.data['data'],
+              retainSnapshot: prefetchEnabled && language == null,
+            );
 
           case .pgc || .pugv:
             final result = res.data['data'];

@@ -175,13 +175,21 @@ class OfficialPlayer extends PlatformPlayer {
   static final _livePlayers = <OfficialPlayer>{};
   static Future<void>? _idleWarmup;
   static int _creatingPlayers = 0;
+  static int _preloadScopeRevision = 0;
+  static String _preloadScope = '${DateTime.now().microsecondsSinceEpoch}_0';
+
+  static void invalidatePreloads() {
+    _preloadScope =
+        '${DateTime.now().microsecondsSinceEpoch}_${++_preloadScopeRevision}';
+    unawaited(enablePreloads(false).catchError((Object _) {}));
+  }
 
   static Future<void> warmUpWhenIdle() {
     if (_idleWarmup case final pending?) return pending;
     if (_creatingPlayers != 0 || _livePlayers.isNotEmpty) {
       return Future.value();
     }
-    final pending = _idleWarmup = _warmUpAndRelease();
+    final pending = _idleWarmup = _warmUpAndRelease().then((_) {});
     void clear() {
       if (identical(_idleWarmup, pending)) _idleWarmup = null;
     }
@@ -190,7 +198,7 @@ class OfficialPlayer extends PlatformPlayer {
     return pending;
   }
 
-  static Future<void> preloadWhenIdle(
+  static Future<String> preloadWhenIdle(
     NetworkSource source, {
     required Duration position,
     required String userAgent,
@@ -202,39 +210,88 @@ class OfficialPlayer extends PlatformPlayer {
         await pending;
       } catch (_) {}
     }
-    if (_creatingPlayers != 0 || _livePlayers.isNotEmpty) return;
-    final pending = _idleWarmup = _warmUpAndRelease(
-      preload: source,
-      position: position,
-      userAgent: userAgent,
-      referer: referer,
-    );
-    void clear() {
+    if (_creatingPlayers != 0) return 'deferred';
+    final active = _livePlayers
+        .where((p) => p._disposing == null && !p._dead && !p._disposed)
+        .firstOrNull;
+    if (active != null) {
+      return active._preload(source, position, userAgent, referer);
+    }
+    var state = 'deferred';
+    final pending = _idleWarmup =
+        _warmUpAndRelease(
+          preload: source,
+          position: position,
+          userAgent: userAgent,
+          referer: referer,
+        ).then((value) {
+          state = value;
+        });
+    try {
+      await pending;
+    } finally {
       if (identical(_idleWarmup, pending)) _idleWarmup = null;
     }
-
-    unawaited(pending.then((_) => clear(), onError: (Object _) => clear()));
-    await pending;
+    return state;
   }
 
-  static Future<void> _warmUpAndRelease({
+  Future<String> _preload(
+    NetworkSource source,
+    Duration position,
+    String userAgent,
+    String referer,
+  ) async {
+    if (_disposed || _disposing != null || _dead) return 'deferred';
+    return await _channel.invokeMethod<String>('preload', {
+          'session': session,
+          ..._sourceArguments(source, false),
+          'position': position.inMilliseconds,
+          'userAgent': userAgent,
+          'referer': referer,
+        }) ??
+        'deferred';
+  }
+
+  static Future<void> enablePreloads(bool enabled) async {
+    while (_idleWarmup != null) {
+      try {
+        await _idleWarmup;
+      } catch (_) {}
+    }
+    if (_creatingPlayers != 0) return;
+    final active = _livePlayers
+        .where((p) => p._disposing == null && !p._dead && !p._disposed)
+        .firstOrNull;
+    if (active != null) {
+      await active._send('preloadControl', {'enabled': enabled});
+      return;
+    }
+    final pending = _idleWarmup = _warmUpAndRelease(enablePreloads: enabled)
+        .then((_) {});
+    try {
+      await pending;
+    } finally {
+      if (identical(_idleWarmup, pending)) _idleWarmup = null;
+    }
+  }
+
+  static Future<String> _warmUpAndRelease({
     NetworkSource? preload,
     Duration position = Duration.zero,
     String userAgent = '',
     String referer = '',
+    bool? enablePreloads,
   }) async {
     OfficialPlayer? player;
     try {
       player = await _create((reason) => Future.error(StateError(reason)));
       await player.warmUp();
-      if (preload != null) {
-        await player._send('preload', {
-          ..._sourceArguments(preload, false),
-          'position': position.inMilliseconds,
-          'userAgent': userAgent,
-          'referer': referer,
-        });
+      if (enablePreloads != null) {
+        await player._send('preloadControl', {'enabled': enablePreloads});
       }
+      return preload == null
+          ? 'idle'
+          : await player._preload(preload, position, userAgent, referer);
     } finally {
       await player?.dispose();
     }
@@ -351,6 +408,7 @@ class OfficialPlayer extends PlatformPlayer {
     DataSource source,
     bool audioOnly,
   ) => {
+    'preloadScope': _preloadScope,
     'source': audioOnly && source.audioSource != null
         ? source.audioSource
         : source.videoSource,
