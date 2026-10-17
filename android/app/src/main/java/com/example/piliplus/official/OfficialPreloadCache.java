@@ -158,6 +158,16 @@ final class OfficialPreloadCache<T> {
             backend.remove(entry.movement,entry.task,entry.item);
         } catch (Exception error) { fail(error); }
         watch(entry);
+        maintainInterrupt(entry);
+    }
+    private void maintainInterrupt(Entry entry) {
+        // Native OpenInner resets IO interrupt; a queued open may start after cancellation.
+        scheduler.after(20, () -> {
+            if (broken || entries.get(entry.task) != entry || entry.state != State.REMOVING) return;
+            try { backend.interrupt(entry.item); }
+            catch (Exception error) { fail(error); return; }
+            maintainInterrupt(entry);
+        });
     }
     private void watch(Entry entry) {
         long movement=entry.movement;
