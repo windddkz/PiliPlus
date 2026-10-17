@@ -128,12 +128,12 @@ final class OfficialRuntime {
             byte[] buffer=new byte[4096];for(int n;(n=in.read(buffer))!=-1;)out.write(buffer,0,n);bytes=out.toByteArray();
         }
         JSONObject manifest=new JSONObject(new String(bytes,"UTF-8"));
-        JSONObject original=manifest.getJSONObject("files"),owned=manifest.getJSONObject("owned");
-        if(!"audio_engine".equals(manifest.getString("engine"))||!"arm64-v8a".equals(manifest.getString("abi"))||original.length()!=10||owned.length()!=3)
+        JSONObject original=manifest.getJSONObject("files"),owned=manifest.getJSONObject("owned"),code=manifest.getJSONObject("code");
+        if(!"audio_engine".equals(manifest.getString("engine"))||!"arm64-v8a".equals(manifest.getString("abi"))||original.length()!=9||owned.length()!=3||code.length()!=1||!code.has("official.apk"))
             throw new SecurityException("Unexpected runtime set");
         File directory=new File(context.getFilesDir(),"official-runtime/"+hash(bytes));
         if(!directory.isDirectory()&&!directory.mkdirs())throw new IOException("Cannot create runtime directory");
-        for(JSONObject group:new JSONObject[]{original,owned})for(Iterator<String> it=group.keys();it.hasNext();) {
+        for(JSONObject group:new JSONObject[]{original,owned,code})for(Iterator<String> it=group.keys();it.hasNext();) {
             String name=it.next();materialize(directory,name,group.getString(name));
         }
         stage("runtime_image");

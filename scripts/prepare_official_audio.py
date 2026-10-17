@@ -27,6 +27,24 @@ with zipfile.ZipFile(apk_path) as apk:
         data = apk_path.read_bytes() if name == 'official.apk' else apk.read('lib/arm64-v8a/' + name)
         assert hashlib.sha256(data).hexdigest() == digest, name
         (destination / name).write_bytes(data)
+# ART otherwise inflates all 33 original DEX files on every cold class-loader creation.
+unaligned = destination / 'code-unaligned.apk'
+try:
+    with zipfile.ZipFile(apk_path) as original, zipfile.ZipFile(unaligned, 'w', allowZip64=True) as output:
+        for entry in original.infolist():
+            contents = original.read(entry.filename)
+            if entry.filename.endswith('.dex'):
+                entry.compress_type = zipfile.ZIP_STORED
+            output.writestr(entry, contents)
+    subprocess.run([str(a.workspace / 'execution/toolchain/android-sdk/build-tools/37.0.0/zipalign'),
+                    '-f', '4', str(unaligned), str(destination / 'official.apk')], check=True)
+    with zipfile.ZipFile(apk_path) as original, zipfile.ZipFile(destination / 'official.apk') as output:
+        assert original.namelist() == output.namelist(), 'Runtime archive entries changed'
+        assert all(original.read(name) == output.read(name) for name in original.namelist()), 'Runtime code/resources changed'
+finally:
+    unaligned.unlink(missing_ok=True)
+manifest['files'].pop('official.apk')
+manifest['code'] = {'official.apk': hashlib.sha256((destination / 'official.apk').read_bytes()).hexdigest()}
 # Native helpers are private runtime assets, never merged with the mpv JNI namespace.
 toolchain = a.workspace / 'execution/toolchain'
 source = repo / 'android/official_audio'
@@ -51,13 +69,13 @@ if previous.exists():
     previous_manifest=json.loads(previous.read_text())
     for group in ['files','owned']:
         for name,digest in previous_manifest.get(group,{}).items():
-            if name not in manifest['files'] and name not in manifest['owned']:
+            if name not in manifest['files'] and name not in manifest['owned'] and name not in manifest['code']:
                 obsolete=destination/name
                 if obsolete.exists():
                     assert hashlib.sha256(obsolete.read_bytes()).hexdigest()==digest, 'Unexpected generated asset: '+name
                     obsolete.unlink()
 (destination/'runtime-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-assert {p.name for p in destination.iterdir()} == {*manifest['files'],*manifest['owned'],'runtime-manifest.json'}
+assert {p.name for p in destination.iterdir()} == {*manifest['files'],*manifest['owned'],*manifest['code'],'runtime-manifest.json'}
 if a.fixtures:
     source = a.workspace / 'native-audio-poc/app/src/main/assets/samples'
     target = repo / 'android/app/src/debug/assets/official_fixture'
