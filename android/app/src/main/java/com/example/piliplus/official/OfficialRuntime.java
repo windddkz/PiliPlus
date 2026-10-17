@@ -515,6 +515,11 @@ final class OfficialRuntime {
         // MediaCodec dimensions describe allocation; the page needs the source image dimensions.
         displayWidth = w > 0 && h > 0 ? w : width;
         displayHeight = w > 0 && h > 0 ? h : height;
+        Bundle size = new Bundle();
+        size.putString("event", "video_size");
+        size.putInt("width", displayWidth);
+        size.putInt("height", displayHeight);
+        emit(size);
         updateHdrSurface();
     }
     private Object callback(int arity, String event, long token) throws Exception {
@@ -1685,8 +1690,8 @@ final class OfficialRuntime {
             Object render = externalOutput =
                     construct("tv.danmaku.ijk.media.player.render.output.IJKPlayerExternalRender");
             invoke(externalRenderer, "setRenderCallback", render);
-            // Flutter owns fitting and cropping; fill its selected output rectangle.
-            invoke(render, "aspectRatio", 2);
+            // Preserve the source ratio while Flutter is still laying out its new window.
+            invoke(render, "aspectRatio", request.getBoolean("preserveAspect", true) ? 1 : 2);
             Object pauseCallback = Proxy.newProxyInstance(loader,
                     new Class<?>[] {cls(
                             "tv.danmaku.ijk.media.player.render.IjkExternalRenderThread$GetPlayerPauseStateCallback")},
@@ -2061,6 +2066,7 @@ final class OfficialRuntime {
         }
         for (String key : new String[] {"scaleX", "scaleY", "offsetX", "offsetY"})
             openRequest.putFloat(key, request.getFloat(key));
+        openRequest.putBoolean("preserveAspect", request.getBoolean("preserveAspect", true));
         applyDisplayTransform();
     }
     private void applyDisplayTransform() throws Exception {
@@ -2070,6 +2076,7 @@ final class OfficialRuntime {
         }
         if (externalOutput == null)
             return;
+        invoke(externalOutput, "aspectRatio", openRequest.getBoolean("preserveAspect", true) ? 1 : 2);
         // Crop in the original renderer instead of allocating a decoder-sized Android window.
         invoke(externalOutput, "translate", Math.round(openRequest.getFloat("offsetX", 0)),
                 Math.round(openRequest.getFloat("offsetY", 0)));

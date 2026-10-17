@@ -58,6 +58,30 @@ void main() {
     return p;
   }
 
+  test(
+    'display dimensions arrive before heartbeat and reset on source change',
+    () async {
+      final p = await prepared();
+      await emit({'event': 'video_size', 'width': 1440, 'height': 1080});
+      expect((p.state.width, p.state.height), (1440, 1080));
+      final next = open(p);
+      await Future<void>.delayed(Duration.zero);
+      expect((p.state.width, p.state.height), (0, 0));
+      await emit({'event': 'video_size', 'width': 3840, 'height': 2160});
+      expect((p.state.width, p.state.height), (0, 0));
+      await emit({
+        'event': 'video_size',
+        'width': 1080,
+        'height': 1920,
+        'load': 2,
+      });
+      expect((p.state.width, p.state.height), (1080, 1920));
+      await emit({'event': 'prepared', 'load': 2});
+      await next;
+      await p.dispose();
+    },
+  );
+
   test('selected stream metadata follows video and audio-only opens', () async {
     final p = await OfficialPlayer.create((_) => throw StateError('fallback'));
     final source = NetworkSource(

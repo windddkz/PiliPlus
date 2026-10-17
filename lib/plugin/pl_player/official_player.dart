@@ -74,7 +74,7 @@ class OfficialPlayer extends PlatformPlayer {
   bool _nativePrepared = false;
   bool resourceUnavailable = false;
   bool initialSeekTimedOut = false;
-  (int, double, double, int, int)? _videoTransform;
+  (int, double, double, int, int, bool)? _videoTransform;
   int? _initialSeekTarget;
   Future<void> _seekTail = Future<void>.value();
   Completer<void>? _seekResult;
@@ -530,6 +530,8 @@ class OfficialPlayer extends PlatformPlayer {
     state.completed = false;
     state.position = position ?? Duration.zero;
     state.duration = Duration.zero;
+    state.width = state.height = 0;
+    sizeController.add((0, 0));
     state.buffer = Duration.zero;
     state.playing = false;
     completedController.add(false);
@@ -606,6 +608,10 @@ class OfficialPlayer extends PlatformPlayer {
     if (raw.containsKey('load') && raw['load'] != _load) return;
     final event = Map<String, dynamic>.from(raw);
     switch (event['event']) {
+      case 'video_size':
+        state.width = (event['width'] as num).toInt();
+        state.height = (event['height'] as num).toInt();
+        sizeController.add((state.width, state.height));
       case 'video_control':
         final pending = _videoControlResult;
         if (pending == null ||
@@ -872,12 +878,18 @@ class OfficialPlayer extends PlatformPlayer {
     'flipX': horizontal,
     'flipY': vertical,
   });
-  Future<void> updateVideoTransform(double x, double y, int dx, int dy) async {
+  Future<void> updateVideoTransform(
+    double x,
+    double y,
+    int dx,
+    int dy, {
+    bool preserveAspect = true,
+  }) async {
     if (!_nativePrepared || _disposed || _disposing != null || _dead) return;
     if (!x.isFinite || !y.isFinite || x <= 0 || y <= 0) {
       throw ArgumentError('Invalid video scale');
     }
-    final request = (_load, x, y, dx, dy);
+    final request = (_load, x, y, dx, dy, preserveAspect);
     if (_videoTransform == request) return;
     _videoTransform = request;
     try {
@@ -887,6 +899,7 @@ class OfficialPlayer extends PlatformPlayer {
         'scaleY': y,
         'offsetX': dx,
         'offsetY': dy,
+        'preserveAspect': preserveAspect,
       });
     } catch (error) {
       if (!_disposed && _disposing == null && _load == request.$1) {

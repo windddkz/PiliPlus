@@ -1669,6 +1669,7 @@ void main() {
         'scaleY': 1.0,
         'offsetX': 10,
         'offsetY': 0,
+        'preserveAspect': true,
       });
       await expectLater(
         p.updateVideoTransform(double.nan, 1, 0, 0),

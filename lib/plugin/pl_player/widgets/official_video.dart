@@ -52,6 +52,11 @@ class OfficialVideo extends StatelessWidget {
                       pixelRatio /
                       2)
                   .round(),
+              preserveAspect:
+                  aspectRatio == null &&
+                  fit != BoxFit.fill &&
+                  (scaleX - 1).abs() < 1e-6 &&
+                  (scaleY - 1).abs() < 1e-6,
             );
           });
           // Keep the native window bounded; the renderer crops the source inside it.

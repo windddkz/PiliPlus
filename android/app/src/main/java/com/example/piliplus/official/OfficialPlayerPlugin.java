@@ -468,6 +468,7 @@ public final class OfficialPlayerPlugin
                 break;
             case "viewport":
                 data.putLong("load", number(call, "load", -1).longValue());
+                data.putBoolean("preserveAspect", !Boolean.FALSE.equals(call.argument("preserveAspect")));
                 for (String key : new String[] {"scaleX", "scaleY", "offsetX", "offsetY"}) {
                     float value = number(call, key, Float.NaN).floatValue();
                     if (!Float.isFinite(value) || (key.startsWith("scale") && value <= 0)

@@ -32,14 +32,21 @@ final class OfficialHdrSurface implements AutoCloseable {
                 // Geometry transforms children too; buffer-only transforms cannot mirror the BLAST child.
                 int transform = (x < 0 ? SurfaceControl.BUFFER_TRANSFORM_MIRROR_HORIZONTAL : 0)
                         | (y < 0 ? SurfaceControl.BUFFER_TRANSFORM_MIRROR_VERTICAL : 0);
+                float fittedWidth = windowWidth, fittedHeight = windowHeight;
+                if (options.getBoolean("preserveAspect", true)) {
+                    float scale = Math.min((float) windowWidth / videoWidth,
+                            (float) windowHeight / videoHeight);
+                    fittedWidth = videoWidth * scale;
+                    fittedHeight = videoHeight * scale;
+                }
                 transaction
                         .setGeometry(layer, new Rect(0, 0, 1, 1),
-                                new Rect(0, 0, Math.max(1, Math.round(Math.abs(x) * windowWidth)),
-                                        Math.max(1, Math.round(Math.abs(y) * windowHeight))),
+                                new Rect(0, 0, Math.max(1, Math.round(Math.abs(x) * fittedWidth)),
+                                        Math.max(1, Math.round(Math.abs(y) * fittedHeight))),
                                 transform)
                         .setPosition(layer,
-                                (1 - x) * windowWidth / 2 + options.getFloat("offsetX", 0),
-                                (1 - y) * windowHeight / 2 + options.getFloat("offsetY", 0));
+                                (windowWidth - x * fittedWidth) / 2 + options.getFloat("offsetX", 0),
+                                (windowHeight - y * fittedHeight) / 2 + options.getFloat("offsetY", 0));
             }
             transaction.apply();
         }

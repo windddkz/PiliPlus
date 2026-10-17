@@ -12,15 +12,20 @@ void main() {
   const commands = MethodChannel('piliplus/official_player');
   const events = MethodChannel('piliplus/official_player/events');
   late OfficialPlayer player;
+  final calls = <MethodCall>[];
   setUp(() async {
+    calls.clear();
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     messenger
       ..setMockMethodCallHandler(
         commands,
-        (call) async => switch (call.method) {
-          'availability' => {'available': true},
-          'create' => {'session': 7},
-          _ => null,
+        (call) async {
+          calls.add(call);
+          return switch (call.method) {
+            'availability' => {'available': true},
+            'create' => {'session': 7},
+            _ => null,
+          };
         },
       )
       ..setMockMethodCallHandler(events, (_) async => null)
@@ -43,6 +48,15 @@ void main() {
   testWidgets(
     'native surface fit uses display geometry and preserves its identity',
     (tester) async {
+      await messenger.handlePlatformMessage(
+        events.name,
+        const StandardMethodCodec().encodeSuccessEnvelope({
+          'session': 7,
+          'event': 'prepared',
+        }),
+        (_) {},
+      );
+      await tester.pump();
       Future<Rect> layout(
         BoxFit fit, {
         double? ratio,
@@ -74,10 +88,28 @@ void main() {
       }
 
       final contain = await layout(BoxFit.contain);
+      expect(
+        calls
+            .lastWhere((c) => c.method == 'viewport')
+            .arguments['preserveAspect'],
+        true,
+      );
       final state = tester.state(find.byType(PlatformViewLink));
       expect(contain.size, const Size(300, 150));
       expect((await layout(BoxFit.cover)).size, const Size(300, 300));
+      expect(
+        calls
+            .lastWhere((c) => c.method == 'viewport')
+            .arguments['preserveAspect'],
+        false,
+      );
       expect((await layout(BoxFit.fill)).size, const Size(300, 300));
+      expect(
+        calls
+            .lastWhere((c) => c.method == 'viewport')
+            .arguments['preserveAspect'],
+        false,
+      );
       expect((await layout(BoxFit.fitWidth)).size, const Size(300, 150));
       expect((await layout(BoxFit.fitHeight)).size, const Size(300, 300));
       expect((await layout(BoxFit.none)).size, const Size(300, 200));
@@ -85,6 +117,12 @@ void main() {
       expect(
         (await layout(BoxFit.contain, ratio: 4 / 3)).size,
         const Size(300, 225),
+      );
+      expect(
+        calls
+            .lastWhere((c) => c.method == 'viewport')
+            .arguments['preserveAspect'],
+        false,
       );
       expect(
         (await layout(BoxFit.contain, ratio: 16 / 9)).size,
