@@ -7,7 +7,7 @@ import android.view.Surface;
 
 /** Non-exported, bound service; all native calls are serialized off the Binder/UI thread. */
 public final class OfficialPlaybackService extends Service {
-    public static final int COMMAND = 1, EVENT = 2, REPLY = 3, TERMINATE = 4;
+    public static final int COMMAND = 1, EVENT = 2, REPLY = 3, TERMINATE = 4, TERMINATE_IDLE = 5;
     private HandlerThread thread;
     private Handler worker;
     private OfficialRuntime runtime;
@@ -18,6 +18,10 @@ public final class OfficialPlaybackService extends Service {
     private final IBinder.DeathRecipient ownerDeath = () -> android.os.Process.killProcess(android.os.Process.myPid());
 
     private final Messenger inbox = new Messenger(new Handler(Looper.getMainLooper(), message -> {
+        if(message.what==TERMINATE_IDLE) {
+            if(owner==null)android.os.Process.killProcess(android.os.Process.myPid());
+            return true;
+        }
         if (message.what == TERMINATE) {
             if (owner != null && message.replyTo != null && owner.equals(message.replyTo.getBinder()))
                 android.os.Process.killProcess(android.os.Process.myPid());

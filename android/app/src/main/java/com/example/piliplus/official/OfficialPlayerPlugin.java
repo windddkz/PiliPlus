@@ -81,7 +81,14 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
     private String lastStage = "bind", terminationReason;
     private boolean processReclaimed;
     private MethodChannel.Result creating;
-    private Pending releasing;
+    private boolean retiringIdle;
+    private final Runnable retireIdle = () -> {
+        if (session != 0 || remote == null) return;
+        retiringIdle=true;
+        Message message=Message.obtain(null,OfficialPlaybackService.TERMINATE_IDLE);
+        message.replyTo=receiver;
+        try {remote.send(message);} catch(RemoteException error) {died("native_process_died");}
+    };
     private IBinder.DeathRecipient death;
 
     private static final class Pending {
@@ -98,7 +105,7 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
         @Override public void onServiceConnected(ComponentName name, IBinder service) {
             if (!bound || token != session) return;
             binder = service; remote = new Messenger(service);
-            death = () -> ui.post(() -> { if (token == session) died("native_process_died"); });
+            death = () -> ui.post(() -> { if (binder == service) died("native_process_died"); });
             try { binder.linkToDeath(death, 0); }
             catch (RemoteException e) { died("native_process_died"); return; }
             send("create", new Bundle(), null, () -> {
@@ -108,10 +115,16 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                 }
             });
         }
-        @Override public void onServiceDisconnected(ComponentName name) { if (bound && token == session) died("native_process_died"); }
-        @Override public void onBindingDied(ComponentName name) { if (bound && token == session) died("binding_died"); }
-        @Override public void onNullBinding(ComponentName name) { if (bound && token == session) died("binding_rejected"); }
+        @Override public void onServiceDisconnected(ComponentName name) { if (bound && connection == this) died("native_process_died"); }
+        @Override public void onBindingDied(ComponentName name) { if (bound && connection == this) died("binding_died"); }
+        @Override public void onNullBinding(ComponentName name) { if (bound && connection == this) died("binding_rejected"); }
     }; }
+
+    private void bind(long token) {
+        connection=connectionFor(token);
+        bound=context.bindService(new Intent(context,OfficialPlaybackService.class),connection,Context.BIND_AUTO_CREATE);
+        if(!bound)died("bind_failed");
+    }
 
     @Override public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
         context = binding.getApplicationContext();
@@ -158,6 +171,7 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
         eventChannel = new EventChannel(binding.getBinaryMessenger(), "piliplus/official_player/events"); eventChannel.setStreamHandler(this);
     }
     @Override public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
+        retiringIdle=false;
         terminate(); died("engine_detached"); channel.setMethodCallHandler(null); eventChannel.setStreamHandler(null); sink = null;
     }
     @Override public void onListen(Object arguments, EventChannel.EventSink events) { sink = events; }
@@ -178,12 +192,16 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
             String reason = unavailable();
             if (reason != null) { result.error(reason, "Official player unavailable", null); return; }
             if (session != 0) { result.error("active_session", "Close the previous player first", null); return; }
+            ui.removeCallbacks(retireIdle);
             session = Math.max(1, SystemClock.elapsedRealtimeNanos()); creating = result;
             closing=false;nativePid=0;lastStage="bind";terminationReason=null;sessionStarted=System.currentTimeMillis();
             long token = session;
-            connection = connectionFor(token);
-            bound = context.bindService(new Intent(context, OfficialPlaybackService.class), connection, Context.BIND_AUTO_CREATE);
-            if (!bound) { died("bind_failed"); return; }
+            if(!retiringIdle) {
+                if(remote!=null)send("create",new Bundle(),null,()->{
+                    if(creating!=null){MethodChannel.Result ready=creating;creating=null;ready.success(values("session",session));}
+                });
+                else bind(token);
+            }
             ui.postDelayed(() -> { if (token == session && creating != null) { terminate(); died("bind_timeout"); } }, 15000);
             return;
         }
@@ -256,7 +274,7 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                 data.putBoolean("flipX",(Boolean)call.argument("flipX"));
                 data.putBoolean("flipY",(Boolean)call.argument("flipY"));break;
             case "play": case "pause": case "warmUp": break;
-            case "dispose": closing=true;cancelWaitingOpen("disposed");send("close",data,result,this::cleanup);return;
+            case "dispose": closing=true;cancelWaitingOpen("disposed");send("close",data,result,()->cleanup(true));return;
             default: result.notImplemented(); return;
         }
         if(call.method.equals("open") && !data.getBoolean("audioOnly")) {
@@ -300,7 +318,6 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
             ui.postDelayed(() -> {
                 if (token == session && pending.containsKey(id)) {
                     Pending operation = pending.remove(id);
-                    if(releasing==operation)releasing=null;
                     if (operation.result != null) operation.result.error("stop_unconfirmed", "Cannot confirm native process stopped", null);
                     emit(values("session", token, "event", "error", "error", "stop_unconfirmed"));
                 }
@@ -323,11 +340,6 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                     pending.put(message.arg1, operation); ui.postDelayed(operation.timeout, 3000); terminationReason="command_failed_close"; terminate();
                 } else if (operation.result != null) operation.result.error("native_command_failed", "Official command failed", data.getString("error"));
                 else { terminationReason="command_failed_"+operation.op; terminate(); }
-            } else if (operation.op.equals("close")) {
-                // Rebinding before onUnbind kills the old process can destroy the next session.
-                releasing=operation;pending.put(message.arg1,operation);
-                ui.postDelayed(operation.timeout,3000);
-                if(bound){context.unbindService(connection);bound=false;}
             } else {
                 if (operation.success != null) operation.success.run();
                 if (operation.result != null) operation.result.success(null);
@@ -362,11 +374,11 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
         return result+"/exit_record_unavailable";
     }
     private void died(String reason) {
-        if(releasing!=null && reason.equals("native_process_died")) {
-            Pending operation=releasing;releasing=null;
-            pending.values().remove(operation);ui.removeCallbacks(operation.timeout);
-            if(operation.success!=null)operation.success.run();
-            if(operation.result!=null)operation.result.success(null);
+        if(retiringIdle && (reason.equals("native_process_died") || reason.equals("binding_died"))) {
+            // A new create waits for the expiring process to die before binding again.
+            long token=session;
+            disconnect();retiringIdle=false;
+            if(creating!=null && token!=0)bind(token);
             return;
         }
         long token = session;
@@ -381,18 +393,26 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
         if (token != 0) emit(values("session", token, "event", "error", "error", reason, "diagnostic", diagnostic,
             "processReclaimed", reason.equals("native_process_died") && processReclaimed));
     }
-    private void cleanup() {
+    private void cleanup() {cleanup(false);}
+    private void cleanup(boolean keepRuntime) {
         cancelWaitingOpen("disposed");
-        releasing=null;session = 0;hostView=null;surface=null;surfaceGeneration++;closing=false;
+        ui.removeCallbacks(retireIdle);
+        retiringIdle=false;session = 0;hostView=null;surface=null;surfaceGeneration++;closing=false;
         for (Pending operation : pending.values()) {
             ui.removeCallbacks(operation.timeout);
             if (operation.result != null) operation.result.error("disposed", "Official player disposed", null);
         }
         pending.clear();
+        if(keepRuntime && remote!=null && bound) {
+            // Only an acknowledged full native release may leave an idle runtime alive.
+            ui.postDelayed(retireIdle,30000);
+        } else disconnect();
+        surface = null; // SurfaceHolder owns this borrowed Surface.
+    }
+    private void disconnect() {
         if (binder != null && death != null) binder.unlinkToDeath(death, 0);
         binder = null; death = null; remote = null;
         if (bound) { context.unbindService(connection); bound = false; }
         connection = null;
-        surface = null; // SurfaceHolder owns this borrowed Surface.
     }
 }

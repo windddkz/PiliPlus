@@ -17,12 +17,17 @@ public final class OfficialPluginTestActivity extends Activity {
     private final List<Peer> peers=new ArrayList<>();
     private final ComponentName component=new ComponentName("owned.fixture","Playback");
     private OfficialPlayerPlugin plugin;
-    private boolean finished, deathDelivered;
+    private boolean finished;
+    private IBinder.DeathRecipient retiredDeath;
     private String scenario;
     private int errors,openErrors,oldMessages;
     private final class Peer {
         int messages,opens;
         final Messenger messenger=new Messenger(new Handler(Looper.getMainLooper(),message->{
+            if(message.what==OfficialPlaybackService.TERMINATE_IDLE){
+                ui.postDelayed(()->{try{retiredDeath.binderDied();}catch(Exception e){finishResult(false,e.toString());}},100);
+                return true;
+            }
             if(message.what==OfficialPlaybackService.TERMINATE){
                 if(scenario.equals("command_timeout"))bindings.get(0).onServiceDisconnected(component);
                 return true;
@@ -45,7 +50,8 @@ public final class OfficialPluginTestActivity extends Activity {
                     return true;
                 }
             }
-            Bundle reply=new Bundle();reply.putLong("session",data.getLong("session"));reply.putBoolean("ok",true);
+            Bundle reply=new Bundle();reply.putLong("session",data.getLong("session"));
+            reply.putBoolean("ok",!("close".equals(data.getString("op")) && scenario.equals("close_stop_timeout")));
             Message out=Message.obtain(null,OfficialPlaybackService.REPLY,message.arg1,0);out.setData(reply);
             try{message.replyTo.send(out);}catch(RemoteException e){finishResult(false,"reply_failed");}
             return true;
@@ -81,17 +87,16 @@ public final class OfficialPluginTestActivity extends Activity {
     @Override public void onCreate(Bundle state){
         super.onCreate(state);scenario=getIntent().getStringExtra("scenario");
         if("platform_flush".equals(scenario)){platformFlush();return;}
-        if(!Arrays.asList("close_wait","close_stop_timeout","stale_disconnect","stale_binding_died","stale_null","stale_connect","current_disconnect","cancel_wait","surface_timeout","audio_without_view","command_timeout","native_exit").contains(scenario)){finish();return;}
+        if("real_runtime".equals(scenario)){realRuntime();return;}
+        if(!Arrays.asList("cache_reuse","idle_race","close_stop_timeout","stale_disconnect","stale_binding_died","stale_null","stale_connect","current_disconnect","cancel_wait","surface_timeout","audio_without_view","command_timeout","native_exit").contains(scenario)){finish();return;}
         try{
             plugin=new OfficialPlayerPlugin();
             field("context",new ContextWrapper(this){
-                @Override public boolean bindService(Intent intent,ServiceConnection connection,int flags){bindings.add(connection);peers.add(new Peer());return true;}
-                @Override public void unbindService(ServiceConnection connection){
-                    try {
-                        IBinder.DeathRecipient death=(IBinder.DeathRecipient)field("death");
-                        if(death!=null&&!scenario.equals("close_stop_timeout"))ui.postDelayed(()->{deathDelivered=true;death.binderDied();},100);
-                    }catch(Exception e){finishResult(false,e.toString());}
+                @Override public boolean bindService(Intent intent,ServiceConnection connection,int flags){
+                    bindings.add(connection);Peer peer=new Peer();peers.add(peer);
+                    ui.post(()->connection.onServiceConnected(component,peer.messenger.getBinder()));return true;
                 }
+                @Override public void unbindService(ServiceConnection connection){}
             });
             field("sink",new EventChannel.EventSink(){
                 public void success(Object event){if(event instanceof Map && "error".equals(((Map<?,?>)event).get("event")))errors++;}
@@ -100,7 +105,6 @@ public final class OfficialPluginTestActivity extends Activity {
             });
             ui.postDelayed(()->finishResult(false,"test_timeout"),9000);
             call("create",null,this::created);
-            bindings.get(0).onServiceConnected(component,peers.get(0).messenger.getBinder());
         }catch(Exception e){finishResult(false,e.toString());}
     }
     private void platformFlush(){
@@ -156,21 +160,78 @@ public final class OfficialPluginTestActivity extends Activity {
             call("dispose",Map.of("session",token),ignored->{
                 if(scenario.equals("close_stop_timeout")){finishResult(false,"unconfirmed_stop_reported_success");return;}
                 oldMessages=peers.get(0).messages;
+                if(!scenario.equals("cache_reuse"))try{
+                    retiredDeath=(IBinder.DeathRecipient)field("death");
+                    ((Runnable)field("retireIdle")).run();
+                }catch(Exception e){finishResult(false,e.toString());return;}
                 call("create",null,this::createdAgain);
-                switch(scenario){
-                    case "stale_disconnect":bindings.get(0).onServiceDisconnected(component);break;
-                    case "stale_binding_died":bindings.get(0).onBindingDied(component);break;
-                    case "stale_null":bindings.get(0).onNullBinding(component);break;
-                    case "stale_connect":bindings.get(0).onServiceConnected(component,peers.get(0).messenger.getBinder());break;
-                }
-                bindings.get(1).onServiceConnected(component,peers.get(1).messenger.getBinder());
             });
         }catch(Exception e){finishResult(false,e.toString());}
     }
     private void createdAgain(Object ignored){
-        if(scenario.equals("close_wait")&&!deathDelivered){finishResult(false,"dispose_returned_before_death");return;}
+        if(scenario.equals("cache_reuse")){
+            try{finishResult(bindings.size()==1 && peers.get(0).messages==oldMessages+1 && session()!=0 && errors==0,"acknowledged_close_reuses_binding");}
+            catch(Exception e){finishResult(false,e.toString());}return;
+        }
+        if(bindings.size()!=2){finishResult(false,"retiring_binding_reused");return;}
+        switch(scenario){
+            case "stale_disconnect":bindings.get(0).onServiceDisconnected(component);break;
+            case "stale_binding_died":bindings.get(0).onBindingDied(component);break;
+            case "stale_null":bindings.get(0).onNullBinding(component);break;
+            case "stale_connect":bindings.get(0).onServiceConnected(component,peers.get(0).messenger.getBinder());break;
+        }
+        retiredDeath.binderDied();
         if(scenario.equals("current_disconnect"))bindings.get(1).onServiceDisconnected(component);
         ui.postDelayed(()->{try{boolean dead=scenario.equals("current_disconnect");finishResult(peers.get(0).messages==oldMessages && (dead?session()==0&&errors==1:session()!=0&&errors==0),"session_ownership");}catch(Exception e){finishResult(false,e.toString());}},100);
+    }
+    private long token(Object value){return ((Number)((Map<?,?>)value).get("session")).longValue();}
+    private void realRuntime(){
+        try{
+            plugin=new OfficialPlayerPlugin();field("context",getApplicationContext());
+            ui.postDelayed(()->finishResult(false,"real_runtime_timeout"),65000);
+            call("create",null,first->call("warmUp",Map.of("session",token(first)),ready->{try{
+                int firstPid=(Integer)field("nativePid");
+                call("dispose",Map.of("session",token(first)),closed->call("create",null,reused->{try{
+                    if((Integer)field("nativePid")!=firstPid)throw new IllegalStateException("Runtime not reused");
+                    plugin.onMethodCall(new MethodCall("warmUp",Map.of("session",token(first))),new MethodChannel.Result(){
+                        public void success(Object value){finishResult(false,"old_session_accepted");}
+                        public void notImplemented(){finishResult(false,"old_session_not_checked");}
+                        public void error(String code,String message,Object details){
+                            if(!code.equals("stale_session")){finishResult(false,"wrong_stale_error");return;}
+                            call("dispose",Map.of("session",token(reused)),done->raceRealRuntime(firstPid));
+                        }
+                    });
+                }catch(Exception e){finishResult(false,e.toString());}}));
+            }catch(Exception e){finishResult(false,e.toString());}}));
+        }catch(Exception e){finishResult(false,e.toString());}
+    }
+    private void raceRealRuntime(int firstPid){
+        try{
+            ((Runnable)field("retireIdle")).run();
+            if(!(Boolean)field("retiringIdle"))throw new IllegalStateException("Retirement not entered");
+            // Same main-thread callback: the new create must queue before the death callback arrives.
+            call("create",null,raced->{try{
+                int nextPid=(Integer)field("nativePid");
+                if(nextPid==firstPid)throw new IllegalStateException("Retiring process reused");
+                call("warmUp",Map.of("session",token(raced)),ready->{
+                    android.os.Process.killProcess(nextPid);
+                    awaitRealState("session",0L,()->call("create",null,recovered->
+                        call("warmUp",Map.of("session",token(recovered)),warm->
+                            call("dispose",Map.of("session",token(recovered)),closed->{try{
+                                ((Runnable)field("retireIdle")).run();
+                                awaitRealState("binder",null,()->finishResult(true,"real_reuse_stale_session_retirement_race_death_recovery"),SystemClock.uptimeMillis()+5000);
+                            }catch(Exception e){finishResult(false,e.toString());}}))),SystemClock.uptimeMillis()+5000);
+                });
+            }catch(Exception e){finishResult(false,e.toString());}});
+        }catch(Exception e){finishResult(false,e.toString());}
+    }
+    private void awaitRealState(String name,Object expected,Runnable next,long deadline){
+        if(finished)return;
+        try{
+            if(Objects.equals(field(name),expected)){next.run();return;}
+            if(SystemClock.uptimeMillis()>=deadline){finishResult(false,"state_timeout_"+name);return;}
+            ui.postDelayed(()->awaitRealState(name,expected,next,deadline),20);
+        }catch(Exception e){finishResult(false,e.toString());}
     }
     private void finishResult(boolean passed,String reason){
         if(finished)return;finished=true;
