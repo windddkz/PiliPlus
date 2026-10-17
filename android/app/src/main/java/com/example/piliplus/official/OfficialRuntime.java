@@ -306,11 +306,11 @@ final class OfficialRuntime {
             boolean directHdr=false;
             if(audio!=null&&!audio.isEmpty()) {
                 if(source.startsWith("/")!=audio.startsWith("/"))throw new IllegalArgumentException("Mixed local/network DASH");
-                stage("video_probe");
-                DashSource video=DashSource.probe(source,sourceTrack==null?Collections.emptyList():sourceTrack.backups,userAgent,referer);
+                stage("dash_probe");
+                DashSource[] tracks=DashSource.probePair(source,sourceTrack==null?Collections.emptyList():sourceTrack.backups,
+                    audio,audioTrack==null?Collections.emptyList():audioTrack.backups,userAgent,referer);
+                DashSource video=tracks[0],sound=tracks[1];
                 directHdr=video.hdr && Build.VERSION.SDK_INT>=33 && outputParent!=null;
-                stage("audio_probe");
-                DashSource sound=DashSource.probe(audio,audioTrack==null?Collections.emptyList():audioTrack.backups,userAgent,referer);
                 if(!Arrays.asList("H264","HEVC","AV1").contains(video.codec)||!Arrays.asList("AAC","FLAC","AC3","EAC3").contains(sound.codec))throw new IllegalArgumentException("DASH track types do not match");
                 Object scheme=cls("com.bilibili.ijk.media.MediaAssetScheme").getField(source.startsWith("/")?"OFFLINE":"VOD").get(null);
                 // Local or manually supplied tracks retain opaque adapter IDs when metadata is unavailable.
@@ -433,12 +433,12 @@ final class OfficialRuntime {
             return construct("com.bilibili.ijk.media.MediaAsset$Normal",source.source,source.backups,scheme,options,null);
         }
         String ua=original.getString("userAgent","PiliPlus"),referer=original.getString("referer","https://www.bilibili.com/");
-        DashSource video=DashSource.probe(source.source,source.backups,ua,referer);
         if(old.getClass().getName().endsWith("$Dash")) {
             OfficialStream audio=streamInfo(next.getBundle("audioTrack"),next.getString("audio"));
             OfficialStream prior=streamInfo(original.getBundle("audioTrack"),original.getString("audio"));
             if(audio==null || prior==null || audio.id!=prior.id)throw new IOException("Refresh changed audio track");
-            DashSource sound=DashSource.probe(audio.source,audio.backups,ua,referer);
+            DashSource[] tracks=DashSource.probePair(source.source,source.backups,audio.source,audio.backups,ua,referer);
+            DashSource video=tracks[0],sound=tracks[1];
             Object oldVideo=((List<?>)invoke(old,"getVideoStreamList")).get(0),oldAudio=((List<?>)invoke(old,"getAudioStreamList")).get(0);
             Object newVideo=dashStream(video,0,source.id,source),newAudio=dashStream(sound,1,audio.id,audio);
             if(!invoke(oldVideo,"getCodecId").equals(invoke(newVideo,"getCodecId")) || !invoke(oldAudio,"getCodecId").equals(invoke(newAudio,"getCodecId")))
@@ -447,6 +447,7 @@ final class OfficialRuntime {
         }
         if(!old.getClass().getName().endsWith("$Normal") || next.getString("audio")!=null)
             throw new IOException("Unsupported resource refresh");
+        DashSource video=DashSource.probe(source.source,source.backups,ua,referer);
         return construct("com.bilibili.ijk.media.MediaAsset$Normal",video.url,source.alternativesFor(video.url),scheme,options,null);
     }
     private Object dashStream(DashSource source,int mediaType,int qn,OfficialStream track) throws Exception {

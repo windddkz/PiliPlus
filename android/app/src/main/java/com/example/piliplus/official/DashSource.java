@@ -5,6 +5,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.SocketTimeoutException;
 import java.util.*;
+import java.util.concurrent.*;
 
 final class DashSource {
     final String url, codec;
@@ -14,6 +15,25 @@ final class DashSource {
 
     static DashSource probe(String source, String userAgent, String referer) throws Exception {
         return probe(source,Collections.emptyList(),userAgent,referer);
+    }
+
+    static DashSource[] probePair(String video,List<String> videoBackups,String audio,List<String> audioBackups,String userAgent,String referer) throws Exception {
+        ExecutorService workers=Executors.newFixedThreadPool(2,r->new Thread(r,"official-dash-probe"));
+        try {
+            // Finish both bounded probes before exposing an asset or starting another open.
+            List<Future<DashSource>> results=workers.invokeAll(Arrays.asList(
+                ()->probe(video,videoBackups,userAgent,referer),
+                ()->probe(audio,audioBackups,userAgent,referer)));
+            return new DashSource[]{results.get(0).get(),results.get(1).get()};
+        } catch(ExecutionException error) {
+            Throwable cause=error.getCause();
+            if(cause instanceof Exception)throw (Exception)cause;
+            if(cause instanceof Error)throw (Error)cause;
+            throw new IOException("DASH probe failed",cause);
+        } catch(InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new InterruptedIOException("DASH probes interrupted");
+        } finally {workers.shutdownNow();}
     }
 
     static DashSource probe(String source,List<String> alternatives,String userAgent,String referer) throws Exception {
@@ -86,8 +106,8 @@ final class DashSource {
             FragmentIndex.Info info = FragmentIndex.inspectInfo(bytes.toByteArray(), length);
             return new DashSource(source, info, length);
         } finally {
-            try {if (input != null) input.close();}
-            finally {if (connection != null) connection.disconnect();}
+            try {if (connection != null) connection.disconnect();}
+            finally {if (input != null) input.close();}
         }
     }
 }
