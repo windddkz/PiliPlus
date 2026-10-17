@@ -5,8 +5,16 @@ import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager.LayoutParams
 import com.ryanheise.audioservice.AudioServiceActivity
+import com.example.piliplus.official.OfficialPlayerPlugin
+import io.flutter.embedding.engine.FlutterEngine
 
 class MainActivity : AudioServiceActivity() {
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        if (!flutterEngine.plugins.has(OfficialPlayerPlugin::class.java)) {
+            flutterEngine.plugins.add(OfficialPlayerPlugin())
+        }
+    }
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (AndroidHelper.isFoldable) {
