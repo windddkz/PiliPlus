@@ -153,7 +153,7 @@ final class OfficialRuntime {
         JSONObject original=manifest.getJSONObject("files"),owned=manifest.getJSONObject("owned"),code=manifest.getJSONObject("code");
         if(!"audio_engine".equals(manifest.getString("engine"))||!"arm64-v8a".equals(manifest.getString("abi"))||original.length()!=9||owned.length()!=3||code.length()!=1||!code.has("official.apk"))
             throw new SecurityException("Unexpected runtime set");
-        File directory=new File(context.getFilesDir(),"official-runtime/"+hash(bytes));
+        File directory=new File(context.getFilesDir(),"official-runtime/"+hash(("platform-loader-v1:"+hash(bytes)).getBytes("UTF-8")));
         if(!directory.isDirectory()&&!directory.mkdirs())throw new IOException("Cannot create runtime directory");
         for(JSONObject group:new JSONObject[]{original,owned,code})for(Iterator<String> it=group.keys();it.hasNext();) {
             String name=it.next();materialize(directory,name,group.getString(name));
@@ -165,21 +165,9 @@ final class OfficialRuntime {
         Bundle cacheEvent=new Bundle();cacheEvent.putString("event","runtime_cache_cleanup");
         cacheEvent.putLong("removedBytes",cache.removedBytes);cacheEvent.putInt("removedDirectories",cache.removedDirectories);
         cacheEvent.putInt("failedDirectories",cache.failedDirectories);emit(cacheEvent);
-        // Keep the app's native namespace (including ARM translation), but share only platform Java classes.
+        // Standard platform-parent loading preserves Java isolation and a compilable ART context.
         loader=new DexClassLoader(new File(directory,"official.apk").getPath()+File.pathSeparator+new File(directory,"audio-bridge-v1.dex").getPath(),
-            context.getCodeCacheDir().getPath(),playerDirectory.getPath()+File.pathSeparator+directory.getPath(),context.getClassLoader()) {
-            @Override protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
-                synchronized (this) {
-                    Class<?> type=findLoadedClass(name);
-                    if(type==null) {
-                        try {type=Context.class.getClassLoader().loadClass(name);}
-                        catch(ClassNotFoundException absent) {type=findClass(name);}
-                    }
-                    if(resolve)resolveClass(type);
-                    return type;
-                }
-            }
-        };
+            context.getCodeCacheDir().getPath(),playerDirectory.getPath()+File.pathSeparator+directory.getPath(),Context.class.getClassLoader());
         try {
             stage("foundation");
             invoke(cls("com.bilibili.lib.foundation.Foundation"),"init",context,

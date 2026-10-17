@@ -92,6 +92,8 @@ android {
         getByName("profile") {
             if (providers.gradleProperty("officialAudio").isPresent) {
                 applicationIdSuffix = ".audio.dev"
+                // Android debug mode prevents ART from compiling the dynamically loaded player.
+                isDebuggable = false
             }
         }
     }
