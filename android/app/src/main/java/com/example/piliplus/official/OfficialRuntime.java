@@ -93,7 +93,9 @@ final class OfficialRuntime {
             throw new SecurityException("Unexpected player image");
         ByteBuffer code=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
         int[][] changes={{0x14898c,0x97fffb92,0xd503201f},{0x1a93c4,0x1b0a7d29,0x9b0a7d29},
-            {0x1a93c8,0x1ac80928,0x9ac80928},{0x18b488,0x540000ab,0xd503201f}};
+            {0x1a93c8,0x1ac80928,0x9ac80928},{0x18b488,0x540000ab,0xd503201f},
+            // AudioGraph accepts 0.25x; the renderer otherwise silently rejects it before reaching the graph.
+            {0x156c38,0x1e2c1000,0x1e2a1000}};
         for(int[] change:changes){
             if(code.getInt(change[0])!=change[1])throw new SecurityException("Player instruction mismatch");
             code.putInt(change[0],change[2]);
