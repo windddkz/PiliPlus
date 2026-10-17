@@ -516,6 +516,11 @@ class AudioController extends GetxController
         loudnessValues: _sourceVolume?.officialValues,
         loudnessScenes: _sourceVolume?.multiSceneArgs,
       );
+      if (audioFocusAvailable &&
+          identical(player, current) &&
+          current.initialSeekTimedOut) {
+        SmartDialog.showToast('起播定位超时，将从实际到达的位置播放，可重新拖动');
+      }
     } else if (current is NativePlayer) {
       current.setMediaHeader(
         userAgent: _sourceUa,

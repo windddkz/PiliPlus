@@ -276,18 +276,23 @@ void main() {
     await p.dispose();
   });
   test(
-    'initial seek timeout fails preparation instead of claiming ready',
+    'initial precision timeout retains the prepared player and actual position',
     () async {
       final p = await OfficialPlayer.create(
         (_) => throw StateError('Unexpected fallback'),
       );
-      final failed = expectLater(
-        open(p, position: 25000),
-        throwsA(isA<PlatformException>()),
-      );
+      final opening = open(p, position: 25000);
       await emit({'event': 'prepared'});
       await result(25000, 216, timeout: true);
-      await failed;
+      await opening;
+      expect(p.initialSeekTimedOut, true);
+      expect(p.state.position.inMilliseconds, 216);
+      await p.play();
+      expect(calls.where((c) => c.method == 'play'), isNotEmpty);
+      final next = open(p);
+      await emit({'event': 'prepared', 'load': 2});
+      await next;
+      expect(p.initialSeekTimedOut, false);
       await p.dispose();
     },
   );
@@ -303,6 +308,41 @@ void main() {
     await seeking;
     await p.dispose();
   });
+  test(
+    'initial precision timeout still waits for native preparation',
+    () async {
+      final p = await OfficialPlayer.create(
+        (_) => throw StateError('Unexpected fallback'),
+      );
+      bool done = false;
+      final opening = open(p, position: 25000).then((_) => done = true);
+      await Future<void>.delayed(Duration.zero);
+      await result(25000, 24920, timeout: true);
+      expect(done, false);
+      await emit({'event': 'prepared'});
+      await opening;
+      expect(p.initialSeekTimedOut, true);
+      expect(p.state.position.inMilliseconds, 24920);
+      await p.dispose();
+    },
+  );
+  test(
+    'native failure after an initial precision timeout still fails open',
+    () async {
+      final p = await OfficialPlayer.create(
+        (_) => throw StateError('Unexpected fallback'),
+      );
+      final failed = expectLater(
+        open(p, position: 25000),
+        throwsA(isA<PlatformException>()),
+      );
+      await Future<void>.delayed(Duration.zero);
+      await result(25000, 24920, timeout: true);
+      await emit({'event': 'error', 'error': 'native_process_died'});
+      await failed;
+      await p.dispose();
+    },
+  );
   test(
     'native death cancels queued seeks without sending another command',
     () async {

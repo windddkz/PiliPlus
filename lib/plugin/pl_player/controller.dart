@@ -1086,6 +1086,11 @@ class PlPlayerController
           userAgent: BrowserUa.pc,
           referer: HttpString.baseUrl,
         );
+        if (_playerCount > 0 &&
+            identical(_videoPlayerController, player) &&
+            player.initialSeekTimedOut) {
+          SmartDialog.showToast('起播定位超时，将从实际到达的位置播放，可重新拖动');
+        }
       } catch (error) {
         if (_playerCount == 0) return;
         await _switchToMpv('官方开片失败：${OfficialPlayer.failureCode(error)}');

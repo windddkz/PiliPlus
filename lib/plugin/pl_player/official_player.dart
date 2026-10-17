@@ -28,6 +28,7 @@ class OfficialPlayer extends PlatformPlayer {
   int _load = 0;
   Completer<void>? _preparing;
   bool _nativePrepared = false;
+  bool initialSeekTimedOut = false;
   (int, double, double, int, int)? _videoTransform;
   int? _initialSeekTarget;
   Future<void> _seekTail = Future<void>.value();
@@ -168,6 +169,7 @@ class OfficialPlayer extends PlatformPlayer {
     _seekTail = Future<void>.value();
     _seekUncertain = false;
     _nativePrepared = false;
+    initialSeekTimedOut = false;
     _initialSeekTarget = (position?.inMilliseconds ?? 0) > 0
         ? position!.inMilliseconds
         : null;
@@ -268,13 +270,9 @@ class OfficialPlayer extends PlatformPlayer {
         }
         if (initial) {
           _initialSeekTarget = null;
-          if (error != null) {
-            if (_preparing case final pending? when !pending.isCompleted) {
-              pending.completeError(error);
-            }
-          } else {
-            _finishPreparation();
-          }
+          // A completed native seek can miss its target without failing the prepared player.
+          initialSeekTimedOut = error != null;
+          _finishPreparation();
         } else if (_seekResult case final pending? when !pending.isCompleted) {
           if (error == null) {
             pending.complete();
