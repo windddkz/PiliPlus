@@ -300,6 +300,35 @@ void main() {
     expect(await cache.take(account, key), isNull);
   });
 
+  test('a full watched history still admits the next page window', () async {
+    PlayUrlKey item(int i) =>
+        (bvid: 'BV-$i', cid: i + 2, tryLook: false, voiceBalance: true);
+    for (var i = 0; i < PlayUrlPrefetch.capacity; i++) {
+      cache.remember(account, item(i), fixture(position: i * 1000));
+    }
+    for (var i = 0; i < 64; i++) {
+      await cache.preload(
+        account,
+        item(PlayUrlPrefetch.capacity + i),
+        () async => Success(fixture()),
+      );
+    }
+    for (var i = 0; i < 64; i++) {
+      expect(
+        await cache.retain(account, item(PlayUrlPrefetch.capacity + i)),
+        isNotNull,
+      );
+    }
+    expect(
+      (await cache.retain(
+        account,
+        item(PlayUrlPrefetch.capacity - 1),
+      ))?.lastPlayTime,
+      (PlayUrlPrefetch.capacity - 1) * 1000,
+    );
+    expect(await cache.retain(account, item(0)), isNull);
+  });
+
   for (final cold in [true, false]) {
     test(
       'clicked snapshot survives capacity before progress arrives (cold: $cold)',

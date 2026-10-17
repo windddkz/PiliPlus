@@ -16,6 +16,7 @@ class PlayUrlPrefetch {
   int _active = 0;
   static int _serial = 0;
   static const capacity = 128;
+  static const _protectedPlaybackCount = 30;
   static const lifetime = Duration(minutes: 20);
 
   void _useAccount(Object account) {
@@ -66,8 +67,13 @@ class PlayUrlPrefetch {
 
   void _makeRoom() {
     if (_entries.length < capacity) return;
+    final protectPlayback =
+        _entries.values.where((entry) => entry.position != null).length <=
+        _protectedPlaybackCount;
     final oldest = _entries.keys.firstWhere(
-      (key) => _entries[key]!.done && _entries[key]!.position == null,
+      (key) =>
+          _entries[key]!.done &&
+          (!protectPlayback || _entries[key]!.position == null),
       orElse: () => _entries.keys.firstWhere((key) => _entries[key]!.done),
     );
     _entries.remove(oldest);
