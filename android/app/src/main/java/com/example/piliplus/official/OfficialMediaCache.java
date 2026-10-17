@@ -6,6 +6,7 @@ import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 import java.util.function.LongSupplier;
+import java.util.function.ToIntFunction;
 
 /** Worker-owned cache leases; a native writer has exclusive access until its release completes. */
 @android.annotation.TargetApi(26)
@@ -14,12 +15,13 @@ final class OfficialMediaCache {
     static final long ENTRY_BYTES = 21 * TRACK_BYTES + 1024 * 1024;
     static final long MIN_FREE_BYTES = 200L * 1024 * 1024;
     static final int MAX_ENTRIES = 64;
-    static final long TOTAL_BYTES = 20L * 1024 * 1024 * 1024;
+    static final long TOTAL_BYTES = 32L * 1024 * 1024 * 1024;
     static final long TTL_MILLIS = 20 * 60 * 1000L;
     private final Path root;
     private final LongSupplier now;
     private final int capacity;
     private final long ttl;
+    private final ToIntFunction<String> priority;
     private final Map<String, Entry> entries = new LinkedHashMap<>();
 
     private static final class Entry {
@@ -52,13 +54,21 @@ final class OfficialMediaCache {
     OfficialMediaCache(File root) throws IOException {
         this(root, System::currentTimeMillis, MAX_ENTRIES, TTL_MILLIS);
     }
+    OfficialMediaCache(File root, ToIntFunction<String> priority) throws IOException {
+        this(root, System::currentTimeMillis, MAX_ENTRIES, TTL_MILLIS, priority);
+    }
     OfficialMediaCache(File root, LongSupplier now, int capacity, long ttl) throws IOException {
+        this(root, now, capacity, ttl, key -> Integer.MAX_VALUE);
+    }
+    OfficialMediaCache(File root, LongSupplier now, int capacity, long ttl,
+            ToIntFunction<String> priority) throws IOException {
         if (capacity < 1 || capacity > MAX_ENTRIES || ttl <= 0)
             throw new IllegalArgumentException("Invalid media cache budget");
         this.root = root.toPath();
         this.now = now;
         this.capacity = capacity;
         this.ttl = ttl;
+        this.priority = priority;
         Files.createDirectories(this.root);
         if (!Files.isDirectory(this.root, LinkOption.NOFOLLOW_LINKS))
             throw new IOException("Invalid media cache root");
@@ -72,7 +82,8 @@ final class OfficialMediaCache {
                         && Files.isRegularFile(complete, LinkOption.NOFOLLOW_LINKS)) {
                     Entry entry = new Entry(path, Files.getLastModifiedTime(complete).toMillis());
                     if (fresh(entry) && bounded(path)) {
-                        entry.played = Files.isRegularFile(path.resolve(".played"), LinkOption.NOFOLLOW_LINKS);
+                        entry.played = Files.isRegularFile(
+                                path.resolve(".played"), LinkOption.NOFOLLOW_LINKS);
                         entries.put(key, entry);
                         continue;
                     }
@@ -214,12 +225,17 @@ final class OfficialMediaCache {
         long age = now.getAsLong() - entry.touched;
         return age >= 0 && age < ttl;
     }
+    private int priority(Entry entry) {
+        return Math.min(priority.applyAsInt(entry.directory.getFileName().toString()),
+                entry.played ? 100 : Integer.MAX_VALUE);
+    }
     private boolean evictOldest(Entry preserve) throws IOException {
         Entry oldest = null;
         for (Entry entry : entries.values())
             if (entry != preserve && entry.lease == null
-                    && (oldest == null || (oldest.played && !entry.played)
-                            || (oldest.played == entry.played && entry.touched < oldest.touched)))
+                    && (oldest == null || priority(entry) > priority(oldest)
+                            || (priority(entry) == priority(oldest)
+                                    && entry.touched < oldest.touched)))
                 oldest = entry;
         if (oldest == null)
             return false;

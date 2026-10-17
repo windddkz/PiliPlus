@@ -466,6 +466,43 @@ public final class OfficialPreloadCacheTest {
             c.event(removal, task, "REMOVED", 0);
             check(c.size() == 0 && f.calls.stream().filter("release:item" ::equals).count() == 1);
         }
-        System.out.println("25 ownership and retained-pool scenarios passed");
+        {
+            Fake f = new Fake();
+            java.util.Map<String, Integer> priority = new java.util.HashMap<>();
+            priority.put("visible", 0);
+            priority.put("distant", 200);
+            OfficialPreloadCache<String> c = new OfficialPreloadCache<>(
+                    f, f, () -> f.now, 2, 30000, item -> priority.getOrDefault(item, 999));
+            c.add("a", "visible");
+            c.event(0, f.task, "READY", 0);
+            f.now++;
+            c.add("b", "distant");
+            c.event(0, f.task, "READY", 0);
+            c.makeRoom();
+            check(f.calls.contains("remove:distant") && !f.calls.contains("remove:visible"));
+            c.event(f.request, f.task, "REMOVED", 0);
+            c.add("c", "new-page");
+            c.event(0, f.task, "READY", 0);
+            priority.clear();
+            priority.put("new-page", 0);
+            c.makeRoom();
+            check(f.calls.contains("remove:visible") && !f.calls.contains("remove:new-page"));
+        }
+        {
+            Fake f = new Fake();
+            OfficialPreloadCache<String> c =
+                    new OfficialPreloadCache<>(f, f, () -> f.now, OfficialPreloadCache.MAX_ENTRIES);
+            check(OfficialPreloadCache.MAX_ENTRIES == 30);
+            for (int n = 0; n < 30; n++) {
+                check(c.add("k" + n, "v" + n));
+                c.event(0, f.task, "READY", 0);
+            }
+            check(!c.add("overflow", "extra") && c.size() == 30);
+            c.event(f.request + 1, f.task, "REMOVED", 0);
+            check(c.size() == 30);
+            c.event(f.request, f.task, "REMOVED", 0);
+            check(c.size() == 29 && c.add("overflow", "extra") && c.size() == 30);
+        }
+        System.out.println("27 ownership, dynamic priority and thirty-slot scenarios passed");
     }
 }

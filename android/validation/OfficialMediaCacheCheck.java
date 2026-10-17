@@ -83,23 +83,48 @@ public final class OfficialMediaCacheCheck {
         long ladderReservation = 7L * 128 * 1024 * 1024 + 1024 * 1024;
         assert budget.acquire(key(1), 7, ladderReservation * 2 - 1) == null;
         var leases = new java.util.ArrayList<OfficialMediaCache.Lease>();
-        for (int i = 0; i < 21; i++) {
+        for (int i = 0; i < 31; i++) {
             var lease = budget.acquire(key(i + 1), 7, Long.MAX_VALUE);
-            assert lease != null : "20 retained ladders plus foreground must fit";
+            assert lease != null : "30 retained ladders plus foreground must fit";
             leases.add(lease);
         }
-        assert budget.acquire(key(22), 21, Long.MAX_VALUE) == null;
+        var extraBudget = budget.acquire(key(32), 21, Long.MAX_VALUE);
+        assert extraBudget != null;
+        assert budget.acquire(key(33), 21, Long.MAX_VALUE) == null;
         budget.release(leases.remove(0), true);
         budget.release(leases.remove(0), true);
-        var replacementBudget = budget.acquire(key(22), 21, Long.MAX_VALUE);
+        var replacementBudget = budget.acquire(key(33), 21, Long.MAX_VALUE);
         assert replacementBudget != null : "Idle entries must return unused track quotas";
         for (var lease : leases)
             budget.release(lease, false);
         budget.release(replacementBudget, false);
+        budget.release(extraBudget, false);
         budget.clear();
         Files.delete(budgetRoot);
+        Path dynamicRoot = Files.createDirectory(base.resolve("dynamic-priority"));
+        var ranks = new java.util.HashMap<String, Integer>();
+        ranks.put(key(1), 0);
+        ranks.put(key(2), 106);
+        var dynamic = new OfficialMediaCache(dynamicRoot.toFile(), now::get, 2, 1000,
+                k -> ranks.getOrDefault(k, Integer.MAX_VALUE));
+        var visible = dynamic.acquire(key(1), 2, Long.MAX_VALUE);
+        dynamic.release(visible, true);
+        now.incrementAndGet();
+        var distant = dynamic.acquire(key(2), 2, Long.MAX_VALUE);
+        dynamic.release(distant, true);
+        var incoming = dynamic.acquire(key(3), 2, Long.MAX_VALUE);
+        assert visible.directory.exists() && !distant.directory.exists();
+        dynamic.release(incoming, true);
+        ranks.clear();
+        ranks.put(key(3), 0);
+        var returned = dynamic.acquire(key(4), 2, Long.MAX_VALUE);
+        assert !visible.directory.exists() && incoming.directory.exists();
+        dynamic.release(returned, false);
+        dynamic.clear();
+        Files.delete(dynamicRoot);
         Path priorityRoot = Files.createDirectory(base.resolve("priority"));
-        OfficialMediaCache priority = new OfficialMediaCache(priorityRoot.toFile(), now::get, 2, 1000);
+        OfficialMediaCache priority =
+                new OfficialMediaCache(priorityRoot.toFile(), now::get, 2, 1000);
         var watched = priority.acquire(key(1), 2, Long.MAX_VALUE);
         priority.markPlayed(watched);
         priority.release(watched, true);

@@ -4,10 +4,11 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import java.util.function.ToIntFunction;
 
 /** Worker-thread ownership of original native preload tasks, including pending removals. */
 final class OfficialPreloadCache<T> {
-    static final int MAX_ENTRIES = 20;
+    static final int MAX_ENTRIES = 30;
     interface Backend<T> {
         void add(long request, long task, T item) throws Exception;
         void detach(long request, long task, T item) throws Exception;
@@ -41,6 +42,7 @@ final class OfficialPreloadCache<T> {
     private final LongSupplier now;
     private final int capacity;
     private final long lifetime;
+    private final ToIntFunction<T> priority;
     private final Map<Long, Entry> entries = new LinkedHashMap<>();
     private long serial;
     private boolean broken;
@@ -53,8 +55,13 @@ final class OfficialPreloadCache<T> {
     }
     OfficialPreloadCache(Backend<T> backend, Scheduler scheduler, LongSupplier now, int capacity,
             long lifetime) {
+        this(backend, scheduler, now, capacity, lifetime, item -> 0);
+    }
+    OfficialPreloadCache(Backend<T> backend, Scheduler scheduler, LongSupplier now, int capacity,
+            long lifetime, ToIntFunction<T> priority) {
         if (capacity < 1 || capacity > MAX_ENTRIES || lifetime <= 0)
             throw new IllegalArgumentException("Invalid preload capacity");
+        this.priority = priority;
         this.backend = backend;
         this.scheduler = scheduler;
         this.now = now;
@@ -92,11 +99,16 @@ final class OfficialPreloadCache<T> {
             // One outstanding removal is enough; its acknowledgement will free the slot.
             if (entry.state == State.REMOVING)
                 return;
+            int order = oldest == null ? 0
+                                       : Integer.compare(priority.applyAsInt(entry.item),
+                                                 priority.applyAsInt(oldest.item));
             if (entry.consumer == null
                     && (entry.state == State.ADDING || entry.state == State.READY)
-                    && (oldest == null
-                            || (entry.state == State.READY && oldest.state != State.READY)
-                            || (entry.state == oldest.state && entry.renewed < oldest.renewed)))
+                    && (oldest == null || order > 0
+                            || (order == 0
+                                    && ((entry.state == State.READY && oldest.state != State.READY)
+                                            || (entry.state == oldest.state
+                                                    && entry.renewed < oldest.renewed)))))
                 oldest = entry;
         }
         if (oldest != null)
