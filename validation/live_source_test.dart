@@ -1,3 +1,4 @@
+import 'package:PiliPlus/models/common/video/live_quality.dart';
 import 'package:PiliPlus/models_new/live/live_room_play_info/codec.dart';
 import 'package:PiliPlus/models_new/live/live_room_play_info/format.dart';
 import 'package:PiliPlus/models_new/live/live_room_play_info/stream.dart';
@@ -8,8 +9,8 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   CodecItem item(String codec, int quality, String path) => CodecItem(
     codecName: codec,
-    currentQn: quality,
-    acceptQn: [10000, 400],
+    currentQn: LiveQuality.fromCode(quality),
+    acceptQn: [LiveQuality.origin, LiveQuality.bluRay],
     baseUrl: path,
     urlInfo: [UrlInfo(host: 'https://cdn.example.invalid', extra: '?owned=1')],
   );

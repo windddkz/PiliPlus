@@ -61,6 +61,7 @@ import 'package:PiliPlus/utils/extension/num_ext.dart';
 import 'package:PiliPlus/utils/extension/size_ext.dart';
 import 'package:PiliPlus/utils/page_utils.dart';
 import 'package:PiliPlus/utils/platform_utils.dart';
+import 'package:PiliPlus/utils/reply_scheme_helper.dart';
 import 'package:PiliPlus/utils/storage.dart';
 import 'package:PiliPlus/utils/storage_key.dart';
 import 'package:PiliPlus/plugin/pl_player/official_player.dart';
@@ -149,9 +150,9 @@ class VideoDetailController extends GetxController
 
   void _acceptVideoQuality(NetworkSource source, int? quality, bool automatic) {
     if (isClosed || !identical(plPlayerController.dataSource, source)) return;
-    final qa = VideoQuality.values
-        .where((item) => item.code == quality)
-        .firstOrNull;
+    final qa = quality != null && quality > 0
+        ? VideoQuality.fromFormat(quality, data.supportFormats)
+        : null;
     actualVideoQa.value = qa;
     if (qa != null) currentVideoQa.value = qa;
     automaticVideo.value = automatic;
@@ -207,7 +208,10 @@ class VideoDetailController extends GetxController
       automaticVideo.value = quality == null;
       if (quality != null) {
         plPlayerController.cacheVideoQa = quality;
-        currentVideoQa.value = VideoQuality.fromCode(quality);
+        currentVideoQa.value = VideoQuality.fromFormat(
+          quality,
+          data.supportFormats,
+        );
         firstVideo = findVideoByQa(quality, setCodecs: true);
       }
       if (!plPlayerController.tempPlayerConf) {
@@ -532,7 +536,9 @@ class VideoDetailController extends GetxController
     tabCtr = TabController(
       length: 2,
       vsync: this,
-      initialIndex: Pref.defaultShowComment ? 1 : 0,
+      initialIndex: Pref.defaultShowComment || args.containsKey(rootRpIdKey)
+          ? 1
+          : 0,
     );
   }
 
@@ -1210,7 +1216,10 @@ class VideoDetailController extends GetxController
           audioUrl = '';
 
           // 实际为FLV/MP4格式，但已被淘汰，这里仅做兜底处理
-          final videoQuality = VideoQuality.fromCode(data.quality!);
+          final videoQuality = VideoQuality.fromFormat(
+            data.quality!,
+            data.supportFormats,
+          );
           firstVideo = VideoItem(
             id: data.quality!,
             baseUrl: videoUrl,

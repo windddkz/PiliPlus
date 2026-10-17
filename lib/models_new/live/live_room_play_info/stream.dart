@@ -1,3 +1,4 @@
+import 'package:PiliPlus/models/common/video/live_quality.dart';
 import 'package:PiliPlus/models_new/live/live_room_play_info/format.dart';
 import 'package:PiliPlus/models_new/live/live_room_play_info/codec.dart';
 
@@ -16,7 +17,8 @@ CodecItem? matchLiveCodec(
     for (final entry in stream.format) {
       if (entry.formatName != format) continue;
       for (final item in entry.codec) {
-        if (item.codecName == codec && item.currentQn == quality) return item;
+        if (item.codecName == codec && item.currentQn.code == quality)
+          return item;
       }
     }
   }
@@ -29,10 +31,13 @@ class Stream {
 
   Stream({this.protocolName, required this.format});
 
-  factory Stream.fromJson(Map<String, dynamic> json) => Stream(
+  factory Stream.fromJson(
+    Map<String, dynamic> json,
+    List<LiveQuality>? liveQn,
+  ) => Stream(
     protocolName: json['protocol_name'],
     format: (json['format'] as List<dynamic>)
-        .map((e) => Format.fromJson(e as Map<String, dynamic>))
+        .map((e) => Format.fromJson(e as Map<String, dynamic>, liveQn))
         .toList(),
   );
 }

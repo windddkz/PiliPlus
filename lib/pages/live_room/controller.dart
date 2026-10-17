@@ -125,10 +125,11 @@ class LiveRoomController extends GetxController {
   late final RxInt pageIndex = 0.obs;
   PageController? pageController;
 
-  int? currentQn = PlatformUtils.isMobile ? null : Pref.liveQuality;
-  final currentQnDesc = ''.obs;
   final RxBool isPortrait = false.obs;
-  late List<({int code, String desc})> acceptQnList = [];
+  late List<LiveQuality> acceptQnList = [];
+  final Rxn<LiveQuality> currentQn = Rxn<LiveQuality>(
+    PlatformUtils.isMobile ? null : .fromCode(Pref.liveQuality),
+  );
 
   late final bool isLogin;
   late final int mid;
@@ -245,15 +246,15 @@ class LiveRoomController extends GetxController {
     bool current() =>
         !isClosed && request == _liveQueryRequest && roomId == requestedRoom;
     final quality =
-        currentQn ??
+        currentQn.value?.code ??
         (await ConnectivityUtils.isWiFi
             ? Pref.liveQuality
             : Pref.liveQualityCellular);
     if (!current()) return;
-    currentQn = quality;
+    currentQn.value = LiveQuality.fromCode(quality);
     final res = await LiveHttp.liveRoomInfo(
       roomId: roomId,
-      qn: currentQn,
+      qn: currentQn.value!.code,
       onlyAudio: plPlayerController.onlyPlayAudio.value,
     );
     if (!current()) return;
@@ -342,16 +343,9 @@ class LiveRoomController extends GetxController {
     final selectedStream = stream.getOrFirst(streamIndex);
     final selectedFormat = selectedStream.format.getOrFirst(formatIndex);
     final CodecItem item = selectedFormat.codec.getOrFirst(codecIndex);
+    acceptQnList = item.acceptQn;
     // 以服务端返回的码率为准
-    currentQn = item.currentQn;
-    acceptQnList = item.acceptQn.map((e) {
-      return (
-        code: e,
-        desc: LiveQuality.fromCode(e)?.desc ?? e.toString(),
-      );
-    }).toList();
-    currentQnDesc.value =
-        LiveQuality.fromCode(currentQn)?.desc ?? currentQn.toString();
+    currentQn.value = item.currentQn;
     videoUrl = VideoUtils.getLiveCdnUrl(item, index: liveUrlIndex);
     _liveSource = _networkSource(
       item,
@@ -378,7 +372,7 @@ class LiveRoomController extends GetxController {
       audioSource: null,
       videoTrack: DashTrack(
         source: url,
-        id: item.currentQn,
+        id: item.currentQn.code,
         bandwidth: null,
         urls: item.urlInfo.map((info) => info.host + item.baseUrl + info.extra),
       ),
@@ -394,7 +388,7 @@ class LiveRoomController extends GetxController {
         if (!current()) return null;
         final result = await LiveHttp.liveRoomInfo(
           roomId: room,
-          qn: item.currentQn,
+          qn: item.currentQn.code,
           onlyAudio: plPlayerController.onlyPlayAudio.value,
         );
         if (!current()) return null;
@@ -408,7 +402,7 @@ class LiveRoomController extends GetxController {
             protocol: protocol,
             format: format,
             codec: item.codecName,
-            quality: item.currentQn,
+            quality: item.currentQn.code,
           );
           if (updated == null || updated.urlInfo.isEmpty) return null;
           return _networkSource(updated, protocol, format, room, request);
@@ -623,13 +617,11 @@ class LiveRoomController extends GetxController {
   }
 
   // 修改画质
-  Future<void>? changeQn(int qn) {
-    if (currentQn == qn) {
+  Future<void>? changeQn(LiveQuality qn) {
+    if (currentQn.value == qn) {
       return null;
     }
-    currentQn = qn;
-    currentQnDesc.value =
-        LiveQuality.fromCode(currentQn)?.desc ?? currentQn.toString();
+    currentQn.value = qn;
     return queryLiveUrl();
   }
 
