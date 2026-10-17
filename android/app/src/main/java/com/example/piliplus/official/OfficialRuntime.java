@@ -949,7 +949,14 @@ final class OfficialRuntime {
             throw new IllegalArgumentException("Invalid preload token");
         OfficialVideoTracks policy = videoPolicy(request);
         JSONObject key = new JSONObject();
-        key.put("token", token);
+        String scope = request.getString("cacheScope");
+        if (scope != null && !scope.matches("[A-Za-z0-9_-]{1,80}"))
+            throw new IllegalArgumentException("Invalid cache scope");
+        // Requests are transient; encoded files belong to the account and exact media identity.
+        if (withPosition || scope == null)
+            key.put("token", token);
+        if (scope != null)
+            key.put("scope", scope);
         if (withPosition)
             key.put("position", request.getLong("position", 0));
         for (String name : new String[] {"source", "audio", "userAgent", "referer"})

@@ -869,6 +869,38 @@ void main() {
     ]);
     await player.dispose();
   });
+  test(
+    'cache account scope is independent of the request generation',
+    () async {
+      Future<Map> request() async {
+        calls.clear();
+        await preload();
+        return calls.singleWhere((call) => call.method == 'preload').arguments
+            as Map;
+      }
+
+      try {
+        OfficialPlayer.invalidatePreloads(cacheScope: 'account_1');
+        await Future<void>.delayed(Duration.zero);
+        final first = await request();
+        OfficialPlayer.invalidatePreloads(cacheScope: 'account_1');
+        await Future<void>.delayed(Duration.zero);
+        final renewed = await request();
+        expect(renewed['cacheScope'], first['cacheScope']);
+        expect(renewed['preloadScope'], isNot(first['preloadScope']));
+        OfficialPlayer.invalidatePreloads(cacheScope: 'account_2');
+        await Future<void>.delayed(Duration.zero);
+        expect((await request())['cacheScope'], 'account_2');
+        OfficialPlayer.invalidatePreloads();
+        await Future<void>.delayed(Duration.zero);
+        expect((await request()).containsKey('cacheScope'), false);
+      } finally {
+        OfficialPlayer.invalidatePreloads();
+        await Future<void>.delayed(Duration.zero);
+        await (await create()).dispose();
+      }
+    },
+  );
   test('media preload does not steal an active player', () async {
     final player = await create();
     await preload();

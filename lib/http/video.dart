@@ -58,7 +58,13 @@ import 'package:protobuf/protobuf.dart';
 /// view层根据 status 判断渲染逻辑
 abstract final class VideoHttp {
   static final _prefetch = PlayUrlPrefetch(
-    onAccountChanged: OfficialPlayer.invalidatePreloads,
+    onAccountChanged: () => OfficialPlayer.invalidatePreloads(
+      cacheScope: switch (Accounts.video) {
+        LoginAccount(:final mid) => 'account_$mid',
+        AnonymousAccount() => 'anonymous',
+        _ => null,
+      },
+    ),
   );
   static final preloadQueue = PreloadQueue(
     load: (item) => prefetchVideoUrl(item.bvid, item.cid),

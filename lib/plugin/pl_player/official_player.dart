@@ -176,8 +176,10 @@ class OfficialPlayer extends PlatformPlayer {
   static int _creatingPlayers = 0;
   static int _preloadScopeRevision = 0;
   static String _preloadScope = '${DateTime.now().microsecondsSinceEpoch}_0';
+  static String? _preloadCacheScope;
 
-  static void invalidatePreloads() {
+  static void invalidatePreloads({String? cacheScope}) {
+    _preloadCacheScope = cacheScope;
     _preloadScope =
         '${DateTime.now().microsecondsSinceEpoch}_${++_preloadScopeRevision}';
     unawaited(enablePreloads(false).catchError((Object _) {}));
@@ -436,6 +438,7 @@ class OfficialPlayer extends PlatformPlayer {
     bool audioOnly,
   ) => {
     'preloadScope': _preloadScope,
+    if (_preloadCacheScope != null) 'cacheScope': _preloadCacheScope,
     'source': audioOnly && source.audioSource != null
         ? source.audioSource
         : source.videoSource,

@@ -530,6 +530,7 @@ public final class OfficialPlayerPlugin
     }
     private static void putSources(MethodCall call, Bundle data) {
         data.putString("preloadScope", call.argument("preloadScope"));
+        data.putString("cacheScope", call.argument("cacheScope"));
         for (String key : new String[] {"source", "audio", "userAgent", "referer"}) {
             String value = call.argument(key);
             if (value != null)

@@ -275,6 +275,50 @@ public final class OfficialPreloadQueueCheck {
                                                : "https://example.invalid/changed");
             check(!original.equals(identity.invoke(runtime, changed, false)));
         }
+        source.putString("cacheScope", "account-a");
+        String persistent = (String) identity.invoke(runtime, source, false);
+        String taskIdentity = (String) identity.invoke(runtime, source, true);
+        java.nio.file.Path directory = java.nio.file.Files.createTempDirectory(
+                java.nio.file.Paths.get("/data/local/tmp"), "piliplus-cache-identity-");
+        OfficialMediaCache disk = new OfficialMediaCache(directory.toFile());
+        OfficialMediaCache.Lease saved = disk.acquire(persistent, 2, Long.MAX_VALUE);
+        check(saved != null && !saved.reused);
+        java.nio.file.Files.write(saved.directory.toPath().resolve("80.bin"), new byte[] {1, 2, 3});
+        disk.release(saved, true);
+        source.putString("preloadToken", "renewed-request");
+        check(persistent.equals(identity.invoke(runtime, source, false)));
+        check(!taskIdentity.equals(identity.invoke(runtime, source, true)));
+        source.putString("preloadScope", "new-process-generation");
+        check(persistent.equals(identity.invoke(runtime, source, false)));
+        try {
+            OfficialRuntime restarted = new OfficialRuntime(context(), null, null);
+            disk = new OfficialMediaCache(directory.toFile());
+            OfficialMediaCache.Lease restored = disk.acquire(
+                    (String) identity.invoke(restarted, source, false), 2, Long.MAX_VALUE);
+            check(restored != null && restored.reused);
+            check(Arrays.equals(new byte[] {1, 2, 3},
+                    java.nio.file.Files.readAllBytes(
+                            restored.directory.toPath().resolve("80.bin"))));
+            disk.release(restored, false);
+        } finally {
+            disk.clear();
+            java.nio.file.Files.delete(directory);
+        }
+        for (String name : new String[] {"source", "audio", "userAgent", "referer"}) {
+            Bundle changed = new Bundle(source);
+            changed.putString(name, "changed");
+            check(!persistent.equals(identity.invoke(runtime, changed, false)));
+        }
+        source.putString("cacheScope", "account-b");
+        check(!persistent.equals(identity.invoke(runtime, source, false)));
+        source.putString("cacheScope", "../invalid");
+        try {
+            identity.invoke(runtime, source, false);
+            throw new AssertionError("Invalid persistent scope accepted");
+        } catch (InvocationTargetException expected) {
+            check(expected.getCause() instanceof IllegalArgumentException);
+        }
+        source.putString("cacheScope", "account-a");
         for (String name : new String[] {"sourceTrack", "audioTrack"}) {
             Bundle track = new Bundle();
             track.putString("source", "https://example.invalid/track");
