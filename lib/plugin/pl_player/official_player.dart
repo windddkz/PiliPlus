@@ -79,9 +79,40 @@ class OfficialPlayer extends PlatformPlayer {
     return '端点配置：$endpoint（$evidence）$branch';
   }
 
+  static Future<void>? _pendingDisposal;
+  static final _stoppingPlayers = <OfficialPlayer>{};
+
+  static Future<void> waitForDisposal() async {
+    await _pendingDisposal;
+    for (final player in _stoppingPlayers.toList()) {
+      if (!player._dead) throw PlatformException(code: 'stop_unconfirmed');
+      await player.dispose();
+    }
+  }
+
+  // The Android service owns one session, shared by video and audio pages.
+  static void deferCreationUntil(Future<void> disposal) {
+    final previous = _pendingDisposal;
+    final barrier = previous == null
+        ? disposal
+        : Future.wait<void>([previous, disposal]).then((_) {});
+    _pendingDisposal = barrier;
+    void clear() {
+      if (identical(_pendingDisposal, barrier)) _pendingDisposal = null;
+    }
+
+    unawaited(
+      barrier.then(
+        (_) => clear(),
+        onError: (Object _, StackTrace _) => clear(),
+      ),
+    );
+  }
+
   static Future<OfficialPlayer> create(
     Future<PlatformPlayer> Function(String reason) fallback,
   ) async {
+    await waitForDisposal();
     final availability = await _channel.invokeMapMethod<String, dynamic>(
       'availability',
     );
@@ -444,13 +475,23 @@ class OfficialPlayer extends PlatformPlayer {
 
   Future<void> _closeStreams() => super.dispose();
   @override
-  Future<void> dispose() => _disposing ??= _dispose()
-      .then((_) => super.dispose())
-      .onError<Object>((error, stack) {
-        // A later Binder death can confirm a previously timed-out native stop.
-        _disposing = null;
-        Error.throwWithStackTrace(error, stack);
-      });
+  Future<void> dispose() {
+    if (_disposing case final pending?) return pending;
+    _stoppingPlayers.add(this);
+    final disposal = _disposing = _dispose()
+        .then((_) async {
+          await super.dispose();
+          _stoppingPlayers.remove(this);
+        })
+        .onError<Object>((error, stack) {
+          // A later Binder death can confirm a previously timed-out native stop.
+          _disposing = null;
+          Error.throwWithStackTrace(error, stack);
+        });
+    deferCreationUntil(disposal);
+    return disposal;
+  }
+
   Future<void> _dispose() async {
     _cancelSeek(StateError('Playback disposed during seek'));
     if (!_dead) {

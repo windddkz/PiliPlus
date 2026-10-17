@@ -474,6 +474,47 @@ void main() {
   });
 
   test(
+    'another page waits for native stop before creating its session',
+    () async {
+      final stopped = Completer<void>();
+      messenger.setMockMethodCallHandler(commands, (call) async {
+        calls.add(call);
+        if (call.method == 'availability') return {'available': true};
+        if (call.method == 'create') return {'session': 7};
+        if (call.method == 'dispose') await stopped.future;
+        return null;
+      });
+      final video = await create();
+      final closing = video.dispose();
+      final audio = create();
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.where((c) => c.method == 'create'), hasLength(1));
+      stopped.complete();
+      await closing;
+      final next = await audio;
+      expect(calls.where((c) => c.method == 'create'), hasLength(2));
+      await next.dispose();
+    },
+  );
+
+  test(
+    'page teardown includes late creation and rejects unconfirmed release',
+    () async {
+      final pageStopped = Completer<void>();
+      OfficialPlayer.deferCreationUntil(pageStopped.future);
+      final creating = create();
+      final failed = expectLater(creating, throwsStateError);
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.where((c) => c.method == 'create'), isEmpty);
+      pageStopped.completeError(StateError('native release not confirmed'));
+      await failed;
+      expect(calls.where((c) => c.method == 'create'), isEmpty);
+      final retry = await create();
+      await retry.dispose();
+    },
+  );
+
+  test(
     'unconfirmed stop fails and later process death allows cleanup',
     () async {
       messenger.setMockMethodCallHandler(commands, (call) async {
@@ -486,8 +527,18 @@ void main() {
       });
       final player = await create();
       await expectLater(player.dispose(), throwsA(isA<PlatformException>()));
+      await Future<void>.delayed(Duration.zero);
+      await expectLater(create(), throwsA(isA<PlatformException>()));
+      await expectLater(
+        OfficialPlayer.waitForDisposal(),
+        throwsA(isA<PlatformException>()),
+      );
       await emit({'event': 'error', 'error': 'native_process_died', 'load': 0});
+      await OfficialPlayer.waitForDisposal();
       await player.dispose();
+      final next = await create();
+      await emit({'event': 'error', 'error': 'native_process_died', 'load': 0});
+      await next.dispose();
       await expectLater(player.play(), throwsStateError);
     },
   );

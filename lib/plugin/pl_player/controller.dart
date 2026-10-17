@@ -141,6 +141,23 @@ class PlPlayerController
     return disposal;
   }
 
+  Future<void> suspendForAudioPage() {
+    ++_sourceRevision;
+    unawaited(audioSessionHandler?.release(this));
+    return _enqueuePlayer(() async {
+      final player = _videoPlayerController;
+      if (player is! OfficialPlayer) {
+        await player?.pause();
+        return;
+      }
+      _removeListeners();
+      await _disposeBackend(player);
+      _videoPlayerController = null;
+      _videoController = null;
+      backendRevision.value++;
+    });
+  }
+
   bool get hasVideoOutput {
     backendRevision.value;
     return _videoController != null || _videoPlayerController is OfficialPlayer;
@@ -937,6 +954,10 @@ class PlPlayerController
     if (_playerCount == 0) {
       throw StateError('Player closed before initialization');
     }
+    await OfficialPlayer.waitForDisposal();
+    if (_playerCount == 0) {
+      throw StateError('Player closed before initialization');
+    }
     if (Platform.isAndroid &&
         Pref.officialAudioBackend &&
         !_forceMpv &&
@@ -979,6 +1000,10 @@ class PlPlayerController
       opt['autosync'] = autosync;
     }
 
+    await OfficialPlayer.waitForDisposal();
+    if (_playerCount == 0) {
+      throw StateError('Player closed before initialization');
+    }
     final player = await Player.create(
       configuration: PlayerConfiguration(
         logLevel: kDebugMode ? .warn : .error,
@@ -1947,6 +1972,7 @@ class PlPlayerController
       await _playerCommands;
       await _backendDisposal;
     }();
+    OfficialPlayer.deferCreationUntil(disposal);
     unawaited(
       disposal.catchError((Object error) {
         debugPrint('Player teardown barrier failed: $error');

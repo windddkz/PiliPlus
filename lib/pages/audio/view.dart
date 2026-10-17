@@ -93,7 +93,14 @@ class _AudioPageState extends State<AudioPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PopScope(
+    onPopInvokedWithResult: (didPop, _) {
+      if (didPop) _controller.stopPlayback();
+    },
+    child: _buildPage(context),
+  );
+
+  Widget _buildPage(BuildContext context) {
     final colorScheme = ColorScheme.of(context);
     final isPortrait = MediaQuery.sizeOf(context).isPortrait;
     final padding = MediaQuery.viewPaddingOf(context);
@@ -633,7 +640,11 @@ class _AudioPageState extends State<AudioPage> {
                   title: const Text('播放信息', style: TextStyle(fontSize: 14)),
                   onTap: () {
                     Get.back();
-                    HeaderControlState.showPlayerInfo(context, player: player);
+                    HeaderControlState.showPlayerInfo(
+                      context,
+                      player: player,
+                      backendDescription: _controller.backendDescription,
+                    );
                   },
                 ),
                 if (PlatformUtils.isMobile)
@@ -641,7 +652,7 @@ class _AudioPageState extends State<AudioPage> {
                     dense: true,
                     leading: const Icon(Icons.volume_up, size: 20),
                     title: Text(
-                      '播放器音量: ${player.getProperty('volume').subLength(3)}%',
+                      '播放器音量: ${player.state.volume.toStringAsFixed(0)}%',
                       style: const TextStyle(fontSize: 14),
                     ),
                     onTap: () {
@@ -649,7 +660,7 @@ class _AudioPageState extends State<AudioPage> {
                       showPlayerVolumeDialog(
                         context,
                         () {},
-                        onChanged: player.setVolume,
+                        onChanged: (volume) => _controller.setVolume(volume / 100),
                       );
                     },
                   ),

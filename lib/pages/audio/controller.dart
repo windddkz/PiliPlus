@@ -28,6 +28,8 @@ import 'package:PiliPlus/pages/video/controller.dart';
 import 'package:PiliPlus/pages/video/introduction/ugc/widgets/triple_mixin.dart';
 import 'package:PiliPlus/plugin/pl_player/controller.dart';
 import 'package:PiliPlus/plugin/pl_player/models/play_repeat.dart';
+import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
+import 'package:PiliPlus/plugin/pl_player/official_player.dart';
 import 'package:PiliPlus/plugin/pl_player/models/play_status.dart';
 import 'package:PiliPlus/services/service_locator.dart';
 import 'package:PiliPlus/services/playback_focus.dart';
@@ -70,9 +72,20 @@ class AudioController extends GetxController
   @override
   bool get audioFocusPlaying => isPlaying();
   @override
-  Future<void> playForAudioFocus() async => player?.play();
+  Future<void> playForAudioFocus() async {
+    await _commands;
+    if (audioFocusAvailable && _wantsPlay) {
+      if (player!.state.completed) await player!.seek(Duration.zero);
+      if (audioFocusAvailable && _wantsPlay) await player?.play();
+    }
+  }
+
   @override
-  Future<void> pauseForAudioFocus() async => player?.pause();
+  Future<void> pauseForAudioFocus() async {
+    await _commands;
+    if (audioFocusAvailable) await player?.pause();
+  }
+
   @override
   Future<void> setAudioDucked(bool ducked) =>
       _audioDucking.apply(player, ducked);
@@ -87,9 +100,40 @@ class AudioController extends GetxController
 
   final audioItem = Rxn<DetailItem>();
 
-  bool _hasInit = false;
   @override
-  Player? player;
+  PlatformPlayer? player;
+  Future<void> _commands = Future.value();
+  Future<void>? _videoHandoff;
+  int _sourceRevision = 0;
+  bool _wantsPlay = true;
+  bool _opening = false;
+  bool _forceMpv = false;
+  String? _officialFallbackReason;
+  String? _sourceUrl;
+  String _sourceUa = Constants.userAgentApp;
+  String? _sourceReferer;
+  http_model.Volume? _sourceVolume;
+
+  bool _currentSource(int revision) =>
+      !_closing && !isClosed && revision == _sourceRevision;
+
+  Future<T> _enqueue<T>(Future<T> Function() action) {
+    final result = _commands.then((_) => action());
+    _commands = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return result;
+  }
+
+  void _reportError(Object error) {
+    if (!_closing) {
+      SmartDialog.showToast('音频播放失败：${OfficialPlayer.failureCode(error)}');
+    }
+  }
+
+  String get backendDescription => player is OfficialPlayer
+      ? '官方内核'
+      : _officialFallbackReason == null
+      ? 'mpv'
+      : 'mpv（回退：$_officialFallbackReason）';
   late int cacheAudioQa;
 
   late bool isDragging = false;
@@ -106,10 +150,15 @@ class AudioController extends GetxController
   late double speed = 1.0;
 
   void setSpeed(double value) {
-    if (player case final player?) {
+    if (player != null) {
       speed = value;
-      player.setRate(value);
-      _updatePlaybackState();
+      unawaited(
+        _enqueue(() async {
+          if (!audioFocusAvailable) return;
+          await player?.setRate(value);
+          _updatePlaybackState();
+        }).catchError(_reportError),
+      );
     }
   }
 
@@ -159,7 +208,15 @@ class AudioController extends GetxController
       _lastVolume = null;
     }
     desktopVolume.value = volume;
-    player?.setVolume(volume * 100);
+    unawaited(
+      _enqueue(() async {
+        if (!audioFocusAvailable) return;
+        if (volume > 1 && player is OfficialPlayer) {
+          await _switchToMpv('播放器音量超过 100%');
+        }
+        await player?.setVolume(volume * 100);
+      }).catchError(_reportError),
+    );
   }
 
   void syncVolume([_]) {
@@ -173,6 +230,12 @@ class AudioController extends GetxController
   @override
   void onInit() {
     super.onInit();
+    animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    );
+    _videoHandoff = PlPlayerController.instance?.suspendForAudioPage();
+    unawaited(_videoHandoff?.catchError(_reportError));
     final args = Get.arguments;
     oid = Int64(args['oid']);
     final id = args['id'];
@@ -205,6 +268,7 @@ class AudioController extends GetxController
       );
     }
     ConnectivityUtils.isWiFi.then((isWiFi) {
+      if (_closing) return;
       cacheAudioQa = isWiFi ? Pref.defaultAudioQa : Pref.defaultAudioQaCellular;
       if (!hasAudioUrl) {
         _queryPlayUrl();
@@ -217,11 +281,6 @@ class AudioController extends GetxController
       ..onSkipToNext = playNext
       ..onSkipToPrevious = playPrev;
 
-    animController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 200),
-    );
-
     if (shutdownTimerService.isActive) {
       shutdownTimerService
         ..onPause = onPause
@@ -233,17 +292,25 @@ class AudioController extends GetxController
     return player?.state.playing ?? false;
   }
 
-  Future<void>? onPlay() {
-    return audioSessionHandler?.play(this).then((_) {}) ?? playForAudioFocus();
+  Future<void> onPlay() async {
+    _wantsPlay = true;
+    await _commands;
+    if (!audioFocusAvailable || !_wantsPlay) return;
+    await (audioSessionHandler?.play(this).then((_) {}) ?? playForAudioFocus());
   }
 
-  Future<void>? onPause() {
+  Future<void> onPause() {
+    _wantsPlay = false;
     return audioSessionHandler?.pause(this) ?? pauseForAudioFocus();
   }
 
-  Future<void>? onSeek(Duration duration) {
-    _updatePlaybackState(position: duration);
-    return player?.seek(duration);
+  Future<void> onSeek(Duration duration) {
+    final revision = _sourceRevision;
+    return _enqueue(() async {
+      if (!_currentSource(revision) || player == null) return;
+      await player!.seek(duration);
+      _updatePlaybackState(position: player!.state.position);
+    }).catchError(_reportError);
   }
 
   void _updateCurrItem(DetailItem item) {
@@ -277,6 +344,7 @@ class AudioController extends GetxController
       extraId: extraId,
       order: order,
     );
+    if (_closing) return;
     if (res case Success(:final response)) {
       if (isInit) {
         late final paginationReply = response.paginationReply;
@@ -317,35 +385,49 @@ class AudioController extends GetxController
   }
 
   Future<bool> _queryPlayUrl() async {
+    final revision = ++_sourceRevision;
+    _wantsPlay = true;
     _querySponsorBlock();
     final res = await AudioGrpc.audioPlayUrl(
       itemType: itemType,
       oid: oid,
       subId: subId,
     );
+    if (!_currentSource(revision)) return false;
     if (res case Success(:final response)) {
-      _onPlay(response);
-      return true;
+      await _onPlay(response, revision);
+      return _currentSource(revision);
     } else {
       res.toast();
       return false;
     }
   }
 
-  void _onPlay(PlayURLResp data) {
+  Future<void> _onPlay(PlayURLResp data, int revision) async {
     final PlayInfo? playInfo = data.playerInfo.values.firstOrNull;
     if (playInfo != null) {
       http_model.Volume? volume;
       if (playInfo.hasVolume()) {
         final volumeInfo = playInfo.volume;
         volume = http_model.Volume(
-          measuredI: volumeInfo.measuredI,
-          measuredLra: volumeInfo.measuredLra,
-          measuredTp: volumeInfo.measuredTp,
-          measuredThreshold: volumeInfo.measuredThreshold,
-          targetOffset: volumeInfo.targetOffset,
-          targetI: volumeInfo.targetI,
-          targetTp: volumeInfo.targetTp,
+          measuredI: volumeInfo.hasMeasuredI()
+              ? volumeInfo.measuredI
+              : double.nan,
+          measuredLra: volumeInfo.hasMeasuredLra()
+              ? volumeInfo.measuredLra
+              : double.nan,
+          measuredTp: volumeInfo.hasMeasuredTp()
+              ? volumeInfo.measuredTp
+              : double.nan,
+          measuredThreshold: volumeInfo.hasMeasuredThreshold()
+              ? volumeInfo.measuredThreshold
+              : double.nan,
+          targetOffset: volumeInfo.hasTargetOffset()
+              ? volumeInfo.targetOffset
+              : double.nan,
+          targetI: volumeInfo.hasTargetI() ? volumeInfo.targetI : double.nan,
+          targetTp: volumeInfo.hasTargetTp() ? volumeInfo.targetTp : double.nan,
+          multiSceneArgs: Map.of(volumeInfo.multiSceneArgs),
         );
       }
       if (playInfo.hasPlayDash()) {
@@ -359,7 +441,11 @@ class AudioController extends GetxController
           (e) => e.id <= cacheAudioQa,
           (a, b) => a.id > b.id ? a : b,
         );
-        _onOpenMedia(VideoUtils.getCdnUrl(audio.playUrls), volume: volume);
+        await _onOpenMedia(
+          VideoUtils.getCdnUrl(audio.playUrls),
+          volume: volume,
+          revision: revision,
+        );
       } else if (playInfo.hasPlayUrl()) {
         final playUrl = playInfo.playUrl;
         final durls = playUrl.durl;
@@ -368,7 +454,11 @@ class AudioController extends GetxController
         }
         final durl = durls.first;
         position.value = 0;
-        _onOpenMedia(VideoUtils.getCdnUrl(durl.playUrls), volume: volume);
+        await _onOpenMedia(
+          VideoUtils.getCdnUrl(durl.playUrls),
+          volume: volume,
+          revision: revision,
+        );
       }
     }
   }
@@ -378,24 +468,114 @@ class AudioController extends GetxController
     String ua = Constants.userAgentApp,
     String? referer,
     http_model.Volume? volume,
+    int? revision,
   }) async {
+    final source = revision ?? ++_sourceRevision;
+    try {
+      await _enqueue(() async {
+        if (!_currentSource(source)) return;
+        await _initPlayerIfNeeded();
+        if (!_currentSource(source) || player == null) return;
+        _sourceUrl = url;
+        _sourceUa = ua;
+        _sourceReferer = referer;
+        _sourceVolume = volume;
+        final start = _start;
+        _start = null;
+        _opening = true;
+        try {
+          await _openCurrent(start);
+        } catch (error) {
+          if (!_currentSource(source) || player is! OfficialPlayer) rethrow;
+          await _switchToMpv(
+            '官方开片失败：${OfficialPlayer.failureCode(error)}',
+            position: start,
+          );
+        } finally {
+          _opening = false;
+        }
+      });
+      if (_currentSource(source) && _wantsPlay) await onPlay();
+    } catch (error) {
+      if (_currentSource(source)) _reportError(error);
+    }
+  }
+
+  Future<void> _openCurrent(Duration? start) async {
+    final current = player!;
+    if (current is OfficialPlayer) {
+      await current.openSource(
+        NetworkSource(videoSource: _sourceUrl!, audioSource: null),
+        position: start,
+        userAgent: _sourceUa,
+        referer: _sourceReferer ?? '',
+        audioOnly: true,
+        loudnessMode: Pref.officialLoudnessMode,
+        loudnessValues: _sourceVolume?.officialValues,
+        loudnessScenes: _sourceVolume?.multiSceneArgs,
+      );
+    } else if (current is NativePlayer) {
+      current.setMediaHeader(
+        userAgent: _sourceUa,
+        headers: {'Referer': _sourceReferer ?? ''},
+      );
+      await current.open(
+        Media(
+          _sourceUrl!,
+          start: start,
+          extras: audioFilterExtras(_sourceVolume),
+        ),
+        play: false,
+      );
+    }
+    if (!audioFocusAvailable || !identical(player, current)) return;
+    await current.setRate(speed);
+    await setAudioDucked(audioSessionHandler?.isDucked(this) ?? false);
+  }
+
+  Future<PlatformPlayer> _switchToMpv(
+    String reason, {
+    Duration? position,
+  }) async {
+    final previous = player;
+    if (previous is! OfficialPlayer) {
+      if (previous != null) return previous;
+      throw StateError('No audio player to restore');
+    }
+    final resume =
+        _wantsPlay &&
+        (audioSessionHandler?.wantsPlayback(this) ?? previous.state.playing);
+    final start = position ?? previous.state.position;
+    final volume = previous.state.volume;
+    _removeListeners();
+    await previous.dispose();
+    player = null;
+    if (_closing) throw StateError('Audio page closed during fallback');
+    _forceMpv = true;
+    _officialFallbackReason = reason;
     await _initPlayerIfNeeded();
-    final extras = audioFilterExtras(volume);
-    final current = player;
-    if (!audioFocusAvailable || current == null) return;
-    current.setMediaHeader(
-      userAgent: ua,
-      // mpv cannot clear referer option
-      headers: {'Referer': ?referer},
-    );
-    final start = _start;
-    _start = null;
-    await current.open(Media(url, start: start, extras: extras), play: false);
-    if (audioFocusAvailable && player == current) await onPlay();
+    if (!audioFocusAvailable) {
+      throw StateError('Audio page closed during fallback');
+    }
+    await _openCurrent(start);
+    await player!.setVolume(volume);
+    if (resume &&
+        _wantsPlay &&
+        (audioSessionHandler?.wantsPlayback(this) ?? true)) {
+      await player!.play();
+    }
+    SmartDialog.showToast('已回退 mpv：$reason');
+    return player!;
+  }
+
+  void _removeListeners() {
+    _subscriptions?.forEach((e) => e.cancel());
+    _subscriptions = null;
   }
 
   PlayerStatus _playerStatus = .paused;
   void _updatePlaybackState({Duration? position, String? debugLabel}) {
+    if (!audioFocusAvailable) return;
     videoPlayerServiceHandler?.onUpdateState(
       _playerStatus,
       false,
@@ -407,28 +587,75 @@ class AudioController extends GetxController
   }
 
   Future<void> _initPlayerIfNeeded() async {
-    if (_hasInit) return;
-    _hasInit = true;
-    assert(player == null, _subscriptions = null);
-    player = await Player.create(
-      configuration: PlayerConfiguration(
-        options: {
-          if (Platform.isAndroid) 'ao': Pref.audioOutput,
-          'volume': PlatformUtils.isDesktop
-              ? (desktopVolume.value * 100).toString()
-              : Pref.playerVolume.toString(),
-          ...Pref.initBuffer(),
-        },
-      ),
-    );
-    if (isClosed) {
-      player!.dispose();
+    if (player != null || _closing) return;
+    await _videoHandoff;
+    if (_closing) return;
+    await OfficialPlayer.waitForDisposal();
+    if (_closing) return;
+    final volume = PlatformUtils.isDesktop
+        ? desktopVolume.value * 100
+        : Pref.playerVolume;
+    if (Platform.isAndroid && Pref.officialAudioBackend && !_forceMpv) {
+      if (enableAudioNormalization || volume > 100) {
+        _forceMpv = true;
+        _officialFallbackReason = '当前均衡或放大设置需要 mpv';
+      } else {
+        OfficialPlayer? candidate;
+        try {
+          candidate = await OfficialPlayer.create(
+            (reason) => _enqueue(() {
+              if (!audioFocusAvailable || !identical(player, candidate)) {
+                throw StateError('Obsolete audio fallback');
+              }
+              return _switchToMpv(reason);
+            }),
+          );
+          await candidate.setVolume(volume);
+          player = candidate;
+        } catch (error) {
+          await candidate?.dispose();
+          _forceMpv = true;
+          _officialFallbackReason =
+              '官方运行时不可用：${OfficialPlayer.failureCode(error)}';
+          if (!_closing) SmartDialog.showToast('官方内核不可用，使用 mpv');
+        }
+      }
+    }
+    if (player == null && !_closing) {
+      await OfficialPlayer.waitForDisposal();
+      if (_closing) return;
+      player = await Player.create(
+        configuration: PlayerConfiguration(
+          options: {
+            if (Platform.isAndroid) 'ao': Pref.audioOutput,
+            'volume': volume.toString(),
+            ...Pref.initBuffer(),
+          },
+        ),
+      );
+    }
+    if (_closing || isClosed) {
+      await player?.dispose();
       player = null;
       return;
     }
-    final stream = player!.stream;
+    final current = player!;
+    final stream = current.stream;
     _subscriptions = [
+      stream.error.listen((error) {
+        if (_closing || _opening || !identical(player, current)) return;
+        if (current is OfficialPlayer) {
+          unawaited(
+            _enqueue(() async {
+              if (audioFocusAvailable && identical(player, current)) {
+                await _switchToMpv(error);
+              }
+            }).catchError(_reportError),
+          );
+        }
+      }),
       stream.position.listen((position) {
+        if (!audioFocusAvailable || !identical(player, current)) return;
         if (isDragging) return;
         final seconds = position.inSeconds;
         if (seconds != this.position.value) {
@@ -440,9 +667,11 @@ class AudioController extends GetxController
         }
       }),
       stream.duration.listen((duration) {
+        if (!audioFocusAvailable || !identical(player, current)) return;
         this.duration.value = duration.inSeconds;
       }),
       stream.playing.listen((playing) {
+        if (!audioFocusAvailable || !identical(player, current)) return;
         if (playing) {
           animController.forward();
           _playerStatus = .playing;
@@ -455,14 +684,16 @@ class AudioController extends GetxController
         }
       }),
       stream.buffering.listen((bool buffering) {
+        if (!audioFocusAvailable || !identical(player, current)) return;
         if (!_playerStatus.isCompleted) {
           _stopStatusTimer();
           _updatePlaybackState();
         }
       }),
       stream.completed.listen((completed) {
-        _videoDetailController?.playedTime = player!.state.duration;
+        if (!audioFocusAvailable || !identical(player, current)) return;
         if (completed) {
+          _videoDetailController?.playedTime = current.state.duration;
           unawaited(audioSessionHandler?.release(this));
           _playerStatus = .completed;
           _startStatusTimer();
@@ -741,6 +972,8 @@ class AudioController extends GetxController
             final nextPart = parts[nextIndex];
             oid = nextPart.oid;
             this.subId = [nextPart.subId];
+            _start = null;
+            _videoDetailController = null;
             _queryPlayUrl().then((res) {
               if (res) {
                 _videoDetailController = null;
@@ -774,6 +1007,8 @@ class AudioController extends GetxController
         subId ??
         (item.subId.isNotEmpty ? item.subId : [audioItem.parts.first.subId]);
     itemType = item.itemType;
+    _start = null;
+    _videoDetailController = null;
     _queryPlayUrl().then((res) {
       if (res) {
         _videoDetailController = null;
@@ -839,9 +1074,11 @@ class AudioController extends GetxController
   @override
   bool get preInitPlayer => true;
 
-  @override
-  void onClose() {
+  void stopPlayback() {
+    if (_closing) return;
     _closing = true;
+    ++_sourceRevision;
+    _wantsPlay = false;
     unawaited(audioSessionHandler?.release(this));
     _stopStatusTimer();
     shutdownTimerService
@@ -856,11 +1093,26 @@ class AudioController extends GetxController
       ..onSkipToPrevious = null
       ..onVideoDetailDispose(hashCode.toString())
       ..clearIfNeeded();
-    _subscriptions?.forEach((e) => e.cancel());
-    _subscriptions?.clear();
-    _subscriptions = null;
-    player?.dispose();
+    _removeListeners();
+    final disposal = player?.dispose();
+    final barrier = () async {
+      await disposal;
+      await _commands;
+    }();
+    OfficialPlayer.deferCreationUntil(barrier);
+    unawaited(
+      barrier.catchError((Object error) {
+        debugPrint(
+          'Audio teardown failed: ${OfficialPlayer.failureCode(error)}',
+        );
+      }),
+    );
     player = null;
+  }
+
+  @override
+  void onClose() {
+    stopPlayback();
     animController.dispose();
     super.onClose();
   }
