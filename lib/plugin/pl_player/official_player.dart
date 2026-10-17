@@ -28,6 +28,7 @@ class OfficialPlayer extends PlatformPlayer {
   int _load = 0;
   Completer<void>? _preparing;
   bool _nativePrepared = false;
+  (int, double, double, int, int)? _videoTransform;
   int? _initialSeekTarget;
   Future<void> _seekTail = Future<void>.value();
   Completer<void>? _seekResult;
@@ -318,6 +319,30 @@ class OfficialPlayer extends PlatformPlayer {
     'flipX': horizontal,
     'flipY': vertical,
   });
+  Future<void> updateVideoTransform(double x, double y, int dx, int dy) async {
+    if (!_nativePrepared || _disposed || _disposing != null || _dead) return;
+    if (!x.isFinite || !y.isFinite || x <= 0 || y <= 0) {
+      throw ArgumentError('Invalid video scale');
+    }
+    final request = (_load, x, y, dx, dy);
+    if (_videoTransform == request) return;
+    _videoTransform = request;
+    try {
+      await _send('viewport', {
+        'load': _load,
+        'scaleX': x,
+        'scaleY': y,
+        'offsetX': dx,
+        'offsetY': dy,
+      });
+    } catch (error) {
+      if (!_disposed && _disposing == null && _load == request.$1) {
+        _videoTransform = null;
+        errorController.add('official:viewport_${failureCode(error)}');
+      }
+    }
+  }
+
   @override
   Future<void> pause() => _send('pause');
   @override

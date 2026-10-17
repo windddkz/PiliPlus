@@ -122,7 +122,9 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
                         if(waitingOpen!=null)flushWaitingOpen();
                         else if(remote!=null){Bundle data=new Bundle();data.putParcelable("surface",surface);send("surface",data,null,null);}
                     }
-                    public void surfaceChanged(SurfaceHolder holder,int format,int width,int height){}
+                    public void surfaceChanged(SurfaceHolder holder,int format,int width,int height){
+                        if(owns() && remote!=null)send("resize",new Bundle(),null,null);
+                    }
                     public void surfaceDestroyed(SurfaceHolder holder){
                         if(!owns())return;
                         surface=null;surfaceGeneration++;
@@ -221,6 +223,16 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
             case "seek": data.putLong("position", number(call, "position", -1).longValue()); break;
             case "speed": data.putFloat("speed", number(call, "speed", Float.NaN).floatValue()); break;
             case "volume": data.putFloat("volume", number(call, "volume", Float.NaN).floatValue()); break;
+            case "viewport":
+                data.putLong("load",number(call,"load",-1).longValue());
+                for(String key:new String[]{"scaleX","scaleY","offsetX","offsetY"}) {
+                    float value=number(call,key,Float.NaN).floatValue();
+                    if(!Float.isFinite(value) || (key.startsWith("scale") && value<=0) || Math.abs(value)>1000000) {
+                        result.error("invalid_viewport","Invalid display transform",null);return;
+                    }
+                    data.putFloat(key,value);
+                }
+                break;
             case "mirror":
                 if(!(call.argument("flipX") instanceof Boolean) || !(call.argument("flipY") instanceof Boolean)) {
                     result.error("invalid_mirror","Both mirror axes are required",null);return;

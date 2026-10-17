@@ -276,8 +276,11 @@ final class OfficialRuntime {
                 invoke(cls("tv.danmaku.ijk.media.player.render.core.BiliRenderContext"),"init",context);
                 cls("tv.danmaku.ijk.media.player.render.IjkExternalRenderThread").getField("EXTERNAL_RENDER_TYPE").setInt(null,0);
                 externalRenderer=construct("tv.danmaku.ijk.media.player.render.IjkExternalRenderThread");
+                invoke(externalRenderer,"setDisableSurfaceAlign",true);
                 Object render=externalOutput=construct("tv.danmaku.ijk.media.player.render.output.IJKPlayerExternalRender");
                 invoke(externalRenderer,"setRenderCallback",render);
+                // Flutter owns fitting and cropping; fill its selected output rectangle.
+                invoke(render,"aspectRatio",2);
                 Object pauseCallback=Proxy.newProxyInstance(loader,new Class<?>[]{cls("tv.danmaku.ijk.media.player.render.IjkExternalRenderThread$GetPlayerPauseStateCallback")},(proxy,method,args)->{
                     switch(method.getName()) {
                         case "toString":return "PiliPlusPlayerPauseState";
@@ -364,9 +367,30 @@ final class OfficialRuntime {
     void mirror(Bundle request) throws Exception {
         if(openRequest==null || request.getLong("load",1)!=load)throw new IllegalStateException("Mirror requires current source");
         boolean x=request.getBoolean("flipX",false),y=request.getBoolean("flipY",false);
-        // Signed scales keep both axes independent; the original mirror API shares its axis selector.
-        if(externalOutput!=null)invoke(externalOutput,"scale",x?-1f:1f,y?-1f:1f);
         openRequest.putBoolean("flipX",x);openRequest.putBoolean("flipY",y);
+        applyDisplayTransform();
+    }
+    void viewport(Bundle request) throws Exception {
+        if(openRequest==null || request.getLong("load",-1)!=load)throw new IllegalStateException("Viewport requires current source");
+        for(String key:new String[]{"scaleX","scaleY","offsetX","offsetY"}) {
+            float value=request.getFloat(key,Float.NaN);
+            if(!Float.isFinite(value) || (key.startsWith("scale") && value<=0) || Math.abs(value)>1000000)throw new IllegalArgumentException("Invalid viewport");
+        }
+        for(String key:new String[]{"scaleX","scaleY","offsetX","offsetY"})openRequest.putFloat(key,request.getFloat(key));
+        applyDisplayTransform();
+    }
+    private void applyDisplayTransform() throws Exception {
+        if(externalOutput==null)return;
+        // Crop in the original renderer instead of allocating a decoder-sized Android window.
+        invoke(externalOutput,"translate",Math.round(openRequest.getFloat("offsetX",0)),Math.round(openRequest.getFloat("offsetY",0)));
+        invoke(externalOutput,"scale",openRequest.getFloat("scaleX",1)*(openRequest.getBoolean("flipX",false)?-1f:1f),openRequest.getFloat("scaleY",1)*(openRequest.getBoolean("flipY",false)?-1f:1f));
+    }
+    void resize() throws Exception {
+        if(externalRenderer!=null && outputSurface!=null && outputSurface.isValid()) {
+            // A paused EGL window can still report its old buffer size until it is reattached.
+            invoke(externalRenderer,"releaseWindowSurface");
+            if(!Boolean.TRUE.equals(invoke(externalRenderer,"createWindowSurface",outputSurface)))throw new IOException("Official output resize failed");
+        }
     }
     void play(boolean value) throws Exception {wantedPlaying=value;if(prepared)invoke(player,value?"start":"pause");}
     void seek(long position) throws Exception {

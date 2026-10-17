@@ -79,6 +79,48 @@ void main() {
   );
 
   test(
+    'viewport waits for preparation, deduplicates and follows source load',
+    () async {
+      final p = await create();
+      await p.updateVideoTransform(2, 1, 10, 0);
+      expect(calls.where((c) => c.method == 'viewport'), isEmpty);
+      var opening = open(p);
+      await Future<void>.delayed(Duration.zero);
+      await emit({'event': 'prepared'});
+      await opening;
+      await p.updateVideoTransform(2, 1, 10, 0);
+      await p.updateVideoTransform(2, 1, 10, 0);
+      var viewport = calls.where((c) => c.method == 'viewport').toList();
+      expect(viewport.length, 1);
+      expect(viewport.single.arguments, {
+        'session': 7,
+        'load': 1,
+        'scaleX': 2.0,
+        'scaleY': 1.0,
+        'offsetX': 10,
+        'offsetY': 0,
+      });
+      await expectLater(
+        p.updateVideoTransform(double.nan, 1, 0, 0),
+        throwsArgumentError,
+      );
+      opening = open(p);
+      await Future<void>.delayed(Duration.zero);
+      await p.updateVideoTransform(3, 1, 0, 0);
+      expect(calls.where((c) => c.method == 'viewport').length, 1);
+      await emit({'event': 'prepared', 'load': 2});
+      await opening;
+      await p.updateVideoTransform(2, 1, 10, 0);
+      viewport = calls.where((c) => c.method == 'viewport').toList();
+      expect(viewport.length, 2);
+      expect(viewport.last.arguments['load'], 2);
+      await p.dispose();
+      await p.updateVideoTransform(1, 1, 0, 0);
+      expect(calls.where((c) => c.method == 'viewport').length, 2);
+    },
+  );
+
+  test(
     'mirror axes follow the source load and default to reset on a new source',
     () async {
       final p = await create();

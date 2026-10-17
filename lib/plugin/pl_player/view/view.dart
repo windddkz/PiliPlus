@@ -2058,6 +2058,8 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
                       child: OfficialVideo(
                         player: player,
                         aspectRatio: videoFit.aspectRatio,
+                        fit: videoFit.boxFit,
+                        alignment: widget.alignment,
                       ),
                     ),
                   );
