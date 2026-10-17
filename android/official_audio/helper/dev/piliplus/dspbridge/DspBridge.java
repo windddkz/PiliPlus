@@ -5,6 +5,7 @@ public final class DspBridge {
     static { System.loadLibrary("piliplus_audio_dsp"); System.loadLibrary("piliplus_audio_graph"); }
     public static native String registerDsp();
     public static native void installMediaInspection();
+    public static native void installFirstSeek();
     public static native int classifyHdr(long nativeItem);
     public static native void interruptPreload(long nativeItem);
     public static native void startGraphAdapter(boolean loudnessEnabled, double gainDb, boolean diagnostics, boolean prefill, boolean videoDiagnostics);
