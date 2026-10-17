@@ -389,8 +389,8 @@ final class OfficialRuntime {
         if(com.example.piliplus.BuildConfig.DEBUG)android.util.Log.d("PiliPreload","probe queued");
         try {probe.future=preloadProbeWorker.submit(()->{
             try {
-                // One bounded background I/O task; foreground opens never wait for these probes.
-                DashSource[] tracks={DashSource.probe(source,video.backups,ua,referer),DashSource.probe(audio,sound.backups,ua,referer)};
+                // Prepare both tracks together; foreground opens cancel this background task.
+                DashSource[] tracks=DashSource.probePair(source,video.backups,audio,sound.backups,ua,referer);
                 worker.post(()->{
                     if(preloadProbes.get(key)!=probe)return;
                     preloadProbes.remove(key);

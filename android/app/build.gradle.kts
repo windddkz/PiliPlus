@@ -89,6 +89,11 @@ android {
         debug {
             applicationIdSuffix = if (providers.gradleProperty("officialAudio").isPresent) ".audio.dev" else ".debug"
         }
+        getByName("profile") {
+            if (providers.gradleProperty("officialAudio").isPresent) {
+                applicationIdSuffix = ".audio.dev"
+            }
+        }
     }
 
     applicationVariants.all {
