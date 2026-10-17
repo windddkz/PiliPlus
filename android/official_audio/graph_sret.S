@@ -10,4 +10,10 @@ graph_make_frame:
     mov x3, x4
     br x5
 .size graph_make_frame, .-graph_make_frame
+.global graph_make_decoder
+.type graph_make_decoder,%function
+graph_make_decoder:
+    mov x8, x0
+    br x1
+.size graph_make_decoder, .-graph_make_decoder
 .section .note.GNU-stack,"",%progbits

@@ -78,6 +78,7 @@ static void flush_adapted(void *context){
  flush_original(context);
  pthread_mutex_lock(&lp_lock);lp_reset();lp_flushes++;pthread_mutex_unlock(&lp_lock);
 }
+#include "decoder_reset.h"
 static int replace_decoder(int install){
  uintptr_t old[2]={(uintptr_t)receive_original,(uintptr_t)flush_original};
  uintptr_t next[2]={(uintptr_t)receive_adapted,(uintptr_t)flush_adapted};
@@ -111,6 +112,8 @@ static SourceResult adapted(void *context){
     SourceResult result=original(context);
     pthread_mutex_lock(&lp_lock);pthread_mutex_lock(&lock);reads++;source_tid=gettid();
     void *old=result.frame;
+    int reset_error=__atomic_load_n(&decoder_reset_error,__ATOMIC_RELAXED);
+    if(reset_error){if(old)release_frame(old);result.frame=NULL;result.status=reset_error;goto done;}
 again:
     if(result.status==0&&old){
         Header h={FIELD(old,8,int),FIELD(old,0x10,int),FIELD(old,0x14,int),FIELD(old,0xc,int),FIELD(old,0x18,int64_t),result.serial,result.queue_serial};
@@ -189,6 +192,10 @@ static int replace(uintptr_t *slot,uintptr_t expected,uintptr_t next){
     return -1;
 }
 static void fail(JNIEnv *env,const char *message){(*env)->ThrowNew(env,(*env)->FindClass(env,"java/lang/IllegalStateException"),message);}
+static int replace_reset_flush(int install){
+    uintptr_t old=(uintptr_t)decoder_flush_original,next=(uintptr_t)reset_decoder;
+    return replace((uintptr_t *)(base+0x2bbe50),install?old:next,install?next:old);
+}
 static int replace_source(int install){return replace((uintptr_t *)(base+0x2b7788),(uintptr_t)(install?original:adapted),(uintptr_t)(install?adapted:original));}
 static void (*soundtouch_constructor)(void *);
 static int (*soundtouch_setting)(void *,int,int);
@@ -205,7 +212,7 @@ static int replace_stretcher(int install){
     return replace((uintptr_t *)(base+0x2ca920),install?old:next,install?next:old);
 }
 #include "video_trace.h"
-static int (*const changes[])(int)={replace_source,replace_decoder,replace_clock_timestamp,replace_video_trace,replace_stretcher};
+static int (*const changes[])(int)={replace_source,replace_decoder,replace_clock_timestamp,replace_video_trace,replace_stretcher,replace_reset_flush};
 static int installed;
 static void restore(JNIEnv *env){
     while(installed){
@@ -221,6 +228,13 @@ JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_startGraphAdapter(J
     matches=0;base=0;dl_iterate_phdr(locate,NULL);
     if(matches!=1||*(uint64_t *)(base+0x159d70)!=UINT64_C(0xa9026ffed101c3ff)||*(uint64_t *)(base+0x191e18)!=UINT64_C(0xa9077bfdd10343ff)){fail(env,"Original source/factory ABI mismatch");return;}
     if(!player_instructions_ready()){fail(env,"Prepared player image unavailable");return;}
+    if(*(uint64_t *)(base+0x196854)!=UINT64_C(0xa9014ff4f81e0ffe)||
+       *(ptrdiff_t *)(base+0x2bbdf8)!=0x28||
+       *(uintptr_t *)(base+0x2bbe20)!=base+0x1a6808||
+       *(uintptr_t *)(base+0x2bbe28)!=base+0x1a6798){fail(env,"Original decoder lifecycle ABI mismatch");return;}
+    decoder_flush_original=(int (*)(void *))(base+0x1a674c);
+    decoder_open_original=(int (*)(void *,void **))(base+0x1a6808);
+    decoder_reset_error=0;decoder_resets=0;
     if(prefill){fail(env,"Startup prefill requires a separate player image");return;}
     if(lp_open()){fail(env,"Locked filter runtime unavailable");return;}
     receive_original=dlsym(lp_lib,"avcodec_receive_frame");flush_original=dlsym(lp_lib,"avcodec_flush_buffers");
@@ -251,7 +265,7 @@ JNIEXPORT void JNICALL Java_dev_piliplus_dspbridge_DspBridge_startGraphAdapter(J
 }
 JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_getGraphState(JNIEnv *env,jclass cls){
     (void)cls;pthread_mutex_lock(&lp_lock);pthread_mutex_lock(&lock);
-    char out[512];snprintf(out,sizeof(out),"{\"active\":%s,\"errors\":%d,\"filter_error\":%d,\"sample_rate\":%d,\"channels\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"duplicate_eof_frames\":%llu}",active?"true":"false",errors+__atomic_load_n(&stretch_error,__ATOMIC_RELAXED),lp_error,last_rate,last_channels,(unsigned long long)lp_frames,(unsigned long long)converted_frames,(unsigned long long)duplicate_eof_frames);
+    char out[512];snprintf(out,sizeof(out),"{\"active\":%s,\"errors\":%d,\"filter_error\":%d,\"sample_rate\":%d,\"channels\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"duplicate_eof_frames\":%llu}",active?"true":"false",errors+__atomic_load_n(&stretch_error,__ATOMIC_RELAXED)+(__atomic_load_n(&decoder_reset_error,__ATOMIC_RELAXED)!=0),lp_error,last_rate,last_channels,(unsigned long long)lp_frames,(unsigned long long)converted_frames,(unsigned long long)duplicate_eof_frames);
     pthread_mutex_unlock(&lock);pthread_mutex_unlock(&lp_lock);return (*env)->NewStringUTF(env,out);
 }
 JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_finishGraphAdapter(JNIEnv *env,jclass cls){
@@ -259,7 +273,7 @@ JNIEXPORT jstring JNICALL Java_dev_piliplus_dspbridge_DspBridge_finishGraphAdapt
     restore(env);
     pthread_mutex_lock(&lp_lock);pthread_mutex_lock(&lock);active=0;lp_close();
     if(previous_frame){release_frame(previous_frame);previous_frame=NULL;}
-    char out[512];snprintf(out,sizeof(out),"{\"restored\":true,\"video_trace_enabled\":%s,\"errors\":%d,\"filter_error\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"filtered_samples\":%llu,\"duplicate_eof_frames\":%llu}",video_trace_enabled?"true":"false",errors+__atomic_load_n(&stretch_error,__ATOMIC_RELAXED),lp_error,(unsigned long long)lp_frames,(unsigned long long)converted_frames,(unsigned long long)lp_samples,(unsigned long long)duplicate_eof_frames);
+    char out[512];snprintf(out,sizeof(out),"{\"restored\":true,\"video_trace_enabled\":%s,\"errors\":%d,\"filter_error\":%d,\"filtered_frames\":%llu,\"converted_frames\":%llu,\"filtered_samples\":%llu,\"duplicate_eof_frames\":%llu}",video_trace_enabled?"true":"false",errors+__atomic_load_n(&stretch_error,__ATOMIC_RELAXED)+(__atomic_load_n(&decoder_reset_error,__ATOMIC_RELAXED)!=0),lp_error,(unsigned long long)lp_frames,(unsigned long long)converted_frames,(unsigned long long)lp_samples,(unsigned long long)duplicate_eof_frames);
     pthread_mutex_unlock(&lock);pthread_mutex_unlock(&lp_lock);return (*env)->NewStringUTF(env,out);
 }
 
