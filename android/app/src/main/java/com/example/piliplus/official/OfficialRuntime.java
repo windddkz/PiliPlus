@@ -27,6 +27,7 @@ final class OfficialRuntime {
     private Object player, item, externalRenderer, externalOutput;
     private Object preloader;
     private OfficialPreloadCache<NativeMedia> preloads;
+    private NativeMedia awaitingOutput;
     private OfficialMediaCache mediaCache;
     private boolean mediaCacheAttempted;
     private Object cachedItemOption;
@@ -320,6 +321,11 @@ final class OfficialRuntime {
     private static boolean useNativeMetadata(OfficialStream video,OfficialStream audio) {
         return video!=null && audio!=null && video.videoCodec()>=0;
     }
+    static boolean canPrepareWithoutSurface(Bundle request) {
+        return !request.getBoolean("isLive",false) && useNativeMetadata(
+            streamInfo(request.getBundle("sourceTrack"),request.getString("source")),
+            streamInfo(request.getBundle("audioTrack"),request.getString("audio")));
+    }
     private Object dashStream(OfficialStream track,int mediaType) throws Exception {
         return construct("com.bilibili.ijk.media.IJKDashStream",mediaType,mediaType==0?track.videoCodec():-1,
             track.id,track.bandwidth,track.source,track.backups);
@@ -566,6 +572,10 @@ final class OfficialRuntime {
         if(token!=generation || player==null){try{releaseItem(media.item);}catch(Exception error){preloadFailure(error);}return;}
         run(token,()->{
             item=media.item;
+            // Media preparation is independent of Flutter's window; decoder startup is not.
+            if(!request.getBoolean("audioOnly",false) && (outputSurface==null || !outputSurface.isValid())) {
+                awaitingOutput=media;stage("wait_output");return;
+            }
             if(media.nativeMetadata) {
                 Object handle=invoke(item,"nativePtrOrNull$srcs_base_ijk_ijk_library_android");
                 if(!(handle instanceof Long))throw new IOException("Missing prepared media handle");
@@ -762,6 +772,10 @@ final class OfficialRuntime {
     }
     void surface(Surface surface) throws Exception {
         outputSurface=surface;
+        if(awaitingOutput!=null && surface!=null && surface.isValid()) {
+            NativeMedia ready=awaitingOutput;awaitingOutput=null;
+            consumePreload(ready,generation,openRequest);return;
+        }
         if(awaitingMediaInfo)return;
         if(prepared && player!=null && externalRenderer==null && hdrSurface==null && surface!=null && !openRequest.getBoolean("audioOnly",false)) {
             configureOutput(false);return;
@@ -820,7 +834,7 @@ final class OfficialRuntime {
         cancelResourceRefresh();
         ++generation;
         if(awaitingPreload!=0 && preloads!=null)preloads.discardExcept(null);
-        awaitingPreload=0;prepared=false;wantedPlaying=false;awaitingMediaInfo=false;
+        awaitingPreload=0;awaitingOutput=null;prepared=false;wantedPlaying=false;awaitingMediaInfo=false;
         if(route!=null){route.stop();route=null;}
         if(player!=null){invoke(player,"release");player=null;}
         if(item!=null){releaseItem(item);item=null;}

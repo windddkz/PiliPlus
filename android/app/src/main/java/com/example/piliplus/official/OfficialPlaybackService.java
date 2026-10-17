@@ -77,7 +77,7 @@ public final class OfficialPlaybackService extends Service {
                 case "create": break;
                 case "warmUp": runtime.initialize(); break;
                 case "preload": runtime.preload(data); break;
-                case "open": runtime.open(data, surface); break;
+                case "open": runtime.open(data, data.getBoolean("awaitOutput")?null:surface); break;
                 case "surface": runtime.outputWindow(data); setSurface(data.getParcelable("surface")); break;
                 case "play": runtime.play(true); break;
                 case "pause": runtime.play(false); break;

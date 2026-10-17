@@ -8,6 +8,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /** Worker-owned directories; native DASH owns the bounded per-track files inside them. */
+@android.annotation.TargetApi(26) // OfficialPlayerPlugin gates this backend at Android 26.
 final class OfficialMediaCache {
     static final long TRACK_BYTES = 64L * 1024 * 1024;
     static final long MIN_FREE_BYTES = 200L * 1024 * 1024;

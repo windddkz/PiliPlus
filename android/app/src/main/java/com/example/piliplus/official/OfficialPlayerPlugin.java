@@ -284,9 +284,10 @@ public final class OfficialPlayerPlugin implements FlutterPlugin, MethodChannel.
             case "dispose": closing=true;cancelWaitingOpen("disposed");send("close",data,result,()->cleanup(true));return;
             default: result.notImplemented(); return;
         }
-        if(call.method.equals("open") && !data.getBoolean("audioOnly")) {
+        if(call.method.equals("open") && !data.getBoolean("audioOnly") && !OfficialRuntime.canPrepareWithoutSurface(data)) {
             waitingOpen=new WaitingOpen(data,result);ui.postDelayed(waitingOpen.timeout,20000);flushWaitingOpen();return;
         }
+        if(call.method.equals("open"))data.putBoolean("awaitOutput",surface==null || !surface.isValid());
         send(call.method, data, result, null);
     }
     private static void putSources(MethodCall call,Bundle data) {
