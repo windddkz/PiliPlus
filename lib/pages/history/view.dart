@@ -1,3 +1,5 @@
+import 'package:PiliPlus/common/widgets/video_preload_scope.dart';
+import 'package:PiliPlus/pages/rcmd/preload_candidates.dart';
 import 'package:PiliPlus/common/widgets/appbar/appbar.dart';
 import 'package:PiliPlus/common/widgets/flutter/pop_scope.dart';
 import 'package:PiliPlus/common/widgets/flutter/refresh_indicator.dart';
@@ -209,21 +211,44 @@ class _HistoryPageState extends State<HistoryPage>
       Loading() => gridSkeleton,
       Success(:final response) =>
         response != null && response.isNotEmpty
-            ? SliverGrid.builder(
-                gridDelegate: gridDelegate,
-                itemBuilder: (context, index) {
-                  if (index == response.length - 1) {
-                    _historyController.onLoadMore();
-                  }
-                  final item = response[index];
-                  return HistoryItem(
-                    item: item,
-                    ctr: _historyController,
-                    onDelete: (kid, business) =>
-                        _historyController.delHistory(item),
-                  );
+            ? VideoPreloadScope(
+                candidates: [
+                  for (final item in response) historyPreloadCandidate(item),
+                ],
+                positions: {
+                  for (final item in response)
+                    if (historyPreloadCandidate(item) case final candidate?)
+                      if (item.playbackProgress case final position?
+                          when position >= 0)
+                        candidate: position,
                 },
-                itemCount: response.length,
+                gridDelegate: gridDelegate,
+                activity: Get.find<HistoryController>(tag: 'all').tabController,
+                isActive: () {
+                  final root = Get.find<HistoryController>(tag: 'all');
+                  final index = root.tabController?.index ?? 0;
+                  final activeType = index == 0
+                      ? null
+                      : root.tabs[index - 1].type;
+                  return activeType == widget.type &&
+                      !root.enableMultiSelect.value;
+                },
+                child: SliverGrid.builder(
+                  gridDelegate: gridDelegate,
+                  itemBuilder: (context, index) {
+                    if (index == response.length - 1) {
+                      _historyController.onLoadMore();
+                    }
+                    final item = response[index];
+                    return HistoryItem(
+                      item: item,
+                      ctr: _historyController,
+                      onDelete: (kid, business) =>
+                          _historyController.delHistory(item),
+                    );
+                  },
+                  itemCount: response.length,
+                ),
               )
             : HttpError(onReload: _historyController.onReload),
       Error(:final errMsg) => HttpError(

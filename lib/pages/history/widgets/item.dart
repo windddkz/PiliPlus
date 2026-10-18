@@ -1,3 +1,4 @@
+import 'package:PiliPlus/http/video.dart';
 import 'package:PiliPlus/common/style.dart';
 import 'package:PiliPlus/common/widgets/image/network_img_layer.dart';
 import 'package:PiliPlus/common/widgets/select_mask.dart';
@@ -273,7 +274,9 @@ Future<void> onPushHistory(HistoryItemModel item) async {
         cover: item.cover,
         title: item.title,
         dimension: dimension,
-        progress: item.playbackProgress,
+        progress:
+            VideoHttp.recentPlaybackPosition(bvid, cid) ??
+            item.playbackProgress,
       );
     }
   }

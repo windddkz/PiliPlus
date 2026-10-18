@@ -6,11 +6,12 @@ typedef PreloadCandidate = ({String bvid, int cid});
 class PreloadQueue {
   PreloadQueue({required this.load, required this.enable, this.window = 64})
     : assert(window > 0);
-  final Future<String> Function(PreloadCandidate) load;
+  final Future<String> Function(PreloadCandidate, int?) load;
   final Future<void> Function(bool, List<PreloadCandidate>, int) enable;
   final int window;
   Object? _owner;
   List<PreloadCandidate> _pending = [];
+  Map<PreloadCandidate, int> _positions = {};
   int _revision = 0;
   int _priorityCount = 6;
   bool _running = false;
@@ -24,11 +25,17 @@ class PreloadQueue {
     Object owner,
     Iterable<PreloadCandidate> candidates, {
     int priorityCount = 6,
+    Map<PreloadCandidate, int> positions = const {},
   }) {
     assert(priorityCount >= 0);
     _priorityCount = priorityCount;
     final ordered = _candidates = candidates.toSet().toList();
     if (!identical(_owner, owner)) _visited.clear();
+    _positions = {
+      for (final item in ordered.take(window))
+        if (positions[item] case final position? when position >= 0)
+          item: position,
+    };
     _owner = owner;
     _controlDirty = true;
     _pending = ordered
@@ -43,9 +50,15 @@ class PreloadQueue {
     Object owner,
     Iterable<PreloadCandidate> candidates, {
     int priorityCount = 6,
+    Map<PreloadCandidate, int> positions = const {},
   }) {
     _visited.clear();
-    update(owner, candidates, priorityCount: priorityCount);
+    update(
+      owner,
+      candidates,
+      priorityCount: priorityCount,
+      positions: positions,
+    );
   }
 
   void pause(Object owner) {
@@ -53,6 +66,7 @@ class PreloadQueue {
     _owner = null;
     _candidates = [];
     _pending = [];
+    _positions = {};
     _visited.clear();
     ++_revision;
     _run();
@@ -88,7 +102,7 @@ class PreloadQueue {
         if (!wanted || _pending.isEmpty) return;
         final candidate = _pending.removeAt(0);
         try {
-          await load(candidate);
+          await load(candidate, _positions[candidate]);
         } catch (_) {
           // A page refill retries this optional request; playback remains independent.
         }

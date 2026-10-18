@@ -19,6 +19,7 @@ class VideoPreloadScope extends StatefulWidget {
     this.isActive,
     this.activity,
     this.separator,
+    this.positions = const {},
   });
 
   final List<PreloadCandidate?> candidates;
@@ -27,6 +28,7 @@ class VideoPreloadScope extends StatefulWidget {
   final bool Function()? isActive;
   final Listenable? activity;
   final int? separator;
+  final Map<PreloadCandidate, int> positions;
 
   @override
   State<VideoPreloadScope> createState() => _VideoPreloadScopeState();
@@ -90,9 +92,14 @@ class _VideoPreloadScopeState extends State<VideoPreloadScope>
         widget.separator,
       );
       final ordered = <int>{...near, ...Iterable.generate(candidates.length)};
-      VideoHttp.preloadQueue.refill(this, [
-        for (final index in ordered) ?candidates[index],
-      ], priorityCount: math.max(6, visibleCount));
+      VideoHttp.preloadQueue.refill(
+        this,
+        [
+          for (final index in ordered) ?candidates[index],
+        ],
+        priorityCount: math.max(6, visibleCount),
+        positions: widget.positions,
+      );
     } catch (_) {
       VideoHttp.preloadQueue.pause(this);
     } finally {

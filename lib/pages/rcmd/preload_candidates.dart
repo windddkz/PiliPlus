@@ -1,3 +1,8 @@
+import 'package:PiliPlus/http/preload_queue.dart';
+import 'package:PiliPlus/models_new/history/list.dart';
+import 'package:PiliPlus/models_new/fav/fav_detail/media.dart';
+import 'package:PiliPlus/utils/id_utils.dart';
+
 import 'dart:math';
 
 import 'package:flutter/rendering.dart';
@@ -31,4 +36,26 @@ Iterable<int> visibleFeedIndices(
     }
     yield hasSeparator && index > separator ? index - 1 : index;
   }
+}
+
+PreloadCandidate? historyPreloadCandidate(HistoryItemModel item) {
+  final history = item.history;
+  if (history.business != null && history.business != 'archive') return null;
+  final cid = history.cid;
+  final bvid =
+      history.bvid ??
+      ((history.oid ?? 0) > 0 ? IdUtils.av2bv(history.oid!) : null);
+  if (cid == null || cid <= 0 || bvid == null || bvid.isEmpty) return null;
+  return (bvid: bvid, cid: cid);
+}
+
+PreloadCandidate? favoritePreloadCandidate(FavDetailItemModel item) {
+  if (const [1, 9].contains(item.attr) ||
+      (item.type != null && item.type != 2)) {
+    return null;
+  }
+  final cid = item.ugc?.firstCid;
+  final bvid = item.bvid;
+  if (cid == null || cid <= 0 || bvid == null || bvid.isEmpty) return null;
+  return (bvid: bvid, cid: cid);
 }

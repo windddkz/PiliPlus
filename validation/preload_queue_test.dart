@@ -7,6 +7,29 @@ PreloadCandidate candidate(int n) => (bvid: 'BV$n', cid: n);
 Future<void> settle() => Future<void>.delayed(Duration.zero);
 
 void main() {
+  test('history positions follow the current page and are cleared on ordinary lists', () async {
+    final requests = <int?>[];
+    final queue = PreloadQueue(
+      load: (_, position) async {
+        requests.add(position);
+        return 'ready';
+      },
+      enable: (_, _, _) async {},
+    );
+    final history = Object(), favorites = Object();
+    queue.refill(history, [candidate(1)], positions: {candidate(1): 120000});
+    await settle();
+    queue.refill(favorites, [candidate(1)]);
+    await settle();
+    queue.pause(favorites);
+    await settle();
+    queue.refill(history, [candidate(1)], positions: {candidate(1): 0});
+    await settle();
+    expect(requests, [120000, null, 0]);
+    queue.pause(history);
+    await settle();
+  });
+
   test(
     'large visible windows keep all visible candidates in the priority tier',
     () async {
@@ -16,7 +39,7 @@ void main() {
         enable: (_, items, count) async {
           counts.add(count);
         },
-        load: (_) async => 'ready',
+        load: (_, _) async => 'ready',
       );
       final owner = Object();
       queue.refill(owner, List.generate(20, candidate), priorityCount: 10);
@@ -36,7 +59,7 @@ void main() {
         window: 3,
         enable: (on, items, priorityCount) async =>
             calls.add('control:$on:${items.map((i) => i.cid).join(',')}'),
-        load: (item) async {
+        load: (item, _) async {
           calls.add('load:${item.cid}');
           return 'ready';
         },
@@ -69,7 +92,7 @@ void main() {
       final loaded = <PreloadCandidate>[];
       final controls = <bool>[];
       final queue = PreloadQueue(
-        load: (item) async {
+        load: (item, _) async {
           loaded.add(item);
           return 'queued';
         },
@@ -104,19 +127,19 @@ void main() {
     final controls = <bool>[];
     final home = Object(), detail = Object();
     final queue = PreloadQueue(
-      load: (item) {
+      load: (item, _) {
         loaded.add(item);
         return loaded.length == 1 ? ready.future : Future.value('ready');
       },
       enable: (on, candidates, priorityCount) async {
         controls.add(on);
       },
-    );
-    queue.update(home, [candidate(1), candidate(2)]);
+    )..update(home, [candidate(1), candidate(2)]);
     await settle();
-    queue.pause(home);
-    queue.update(detail, [candidate(3)]);
-    queue.pause(home);
+    queue
+      ..pause(home)
+      ..update(detail, [candidate(3)])
+      ..pause(home);
     ready.complete('queued');
     await settle();
     expect(loaded, [candidate(1), candidate(3)]);
@@ -131,7 +154,7 @@ void main() {
   test('failed control does not spin and can be retried on refill', () async {
     var calls = 0, loads = 0;
     final queue = PreloadQueue(
-      load: (_) async {
+      load: (_, _) async {
         loads++;
         return 'stored';
       },

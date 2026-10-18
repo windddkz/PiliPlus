@@ -24,6 +24,69 @@ void main() {
     cache = PlayUrlPrefetch(now: () => now);
   });
   test(
+    'history hints align preload and click; local progress wins on return',
+    () async {
+      await cache.preload(
+        account,
+        key,
+        () async => Success(fixture(position: 9000)),
+      );
+      expect(
+        (await cache.retain(
+          account,
+          key,
+          initialPosition: 120000,
+        ))!.lastPlayTime,
+        120000,
+      );
+      final played = (await cache.take(account, key))!;
+      expect(played.lastPlayTime, 120000);
+      cache.recordPosition(account, played.officialPreloadToken!, 180000);
+      expect(
+        (await cache.retain(
+          account,
+          key,
+          initialPosition: 120000,
+        ))!.lastPlayTime,
+        180000,
+      );
+      expect(cache.playbackPosition(account, key.bvid, key.cid), 180000);
+      cache.recordPosition(
+        account,
+        played.officialPreloadToken!,
+        200000,
+        completed: true,
+      );
+      expect(
+        (await cache.retain(
+          account,
+          key,
+          initialPosition: 120000,
+        ))!.lastPlayTime,
+        0,
+      );
+      expect(cache.playbackPosition(account, key.bvid, key.cid), 0);
+      expect(cache.playbackPosition(Object(), key.bvid, key.cid), isNull);
+      now = now.add(PlayUrlPrefetch.lifetime);
+      expect(cache.playbackPosition(account, key.bvid, key.cid), isNull);
+    },
+  );
+  test(
+    'completed remote history starts at zero despite server resume',
+    () async {
+      await cache.preload(
+        account,
+        key,
+        () async => Success(fixture(position: 9000)),
+      );
+      expect(
+        (await cache.retain(account, key, initialPosition: 0))!.lastPlayTime,
+        0,
+      );
+      expect((await cache.take(account, key))!.lastPlayTime, 0);
+    },
+  );
+  test(
     'visible candidate retains one response without downloading again',
     () async {
       final model = fixture();

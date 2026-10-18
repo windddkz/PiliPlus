@@ -1,3 +1,5 @@
+import 'package:PiliPlus/common/widgets/video_preload_scope.dart';
+import 'package:PiliPlus/pages/rcmd/preload_candidates.dart';
 import 'package:PiliPlus/models_new/history/data.dart';
 import 'package:PiliPlus/models_new/history/list.dart';
 import 'package:PiliPlus/pages/common/search/common_search_page.dart';
@@ -27,21 +29,31 @@ class _HistorySearchPageState
 
   @override
   Widget buildList(List<HistoryItemModel> list) {
-    return SliverGrid.builder(
-      gridDelegate: gridDelegate,
-      itemBuilder: (context, index) {
-        if (index == list.length - 1) {
-          controller.onLoadMore();
-        }
-        final item = list[index];
-        return HistoryItem(
-          item: item,
-          ctr: controller,
-          onDelete: (kid, business) =>
-              controller.onDelHistory(index, kid, business),
-        );
+    return VideoPreloadScope(
+      candidates: [for (final item in list) historyPreloadCandidate(item)],
+      positions: {
+        for (final item in list)
+          if (historyPreloadCandidate(item) case final candidate?)
+            if (item.playbackProgress case final position? when position >= 0)
+              candidate: position,
       },
-      itemCount: list.length,
+      gridDelegate: gridDelegate,
+      child: SliverGrid.builder(
+        gridDelegate: gridDelegate,
+        itemBuilder: (context, index) {
+          if (index == list.length - 1) {
+            controller.onLoadMore();
+          }
+          final item = list[index];
+          return HistoryItem(
+            item: item,
+            ctr: controller,
+            onDelete: (kid, business) =>
+                controller.onDelHistory(index, kid, business),
+          );
+        },
+        itemCount: list.length,
+      ),
     );
   }
 }

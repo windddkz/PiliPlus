@@ -67,7 +67,8 @@ abstract final class VideoHttp {
     ),
   );
   static final preloadQueue = PreloadQueue(
-    load: (item) => prefetchVideoUrl(item.bvid, item.cid),
+    load: (item, position) =>
+        prefetchVideoUrl(item.bvid, item.cid, initialPosition: position),
     enable: (enabled, candidates, priorityCount) =>
         OfficialPlayer.enablePreloads(
           enabled,
@@ -91,7 +92,11 @@ abstract final class VideoHttp {
     }
   }
 
-  static Future<String> prefetchVideoUrl(String bvid, int cid) async {
+  static Future<String> prefetchVideoUrl(
+    String bvid,
+    int cid, {
+    int? initialPosition,
+  }) async {
     if (!prefetchEnabled) return 'disabled';
     if (!await _preloadWiFi() || !prefetchEnabled) return 'retry';
     final account = Accounts.video;
@@ -103,7 +108,11 @@ abstract final class VideoHttp {
           Pref.audioNormalization != '0' ||
           const {'normal', 'high_dynamic'}.contains(Pref.officialLoudnessMode),
     );
-    final retained = await _prefetch.retain(account, key);
+    final retained = await _prefetch.retain(
+      account,
+      key,
+      initialPosition: initialPosition,
+    );
     if (!identical(account, Accounts.video)) return 'retry';
     if (retained != null) {
       if (const bool.fromEnvironment('PILI_PRELOAD_TRACE')) {
@@ -138,7 +147,11 @@ abstract final class VideoHttp {
         cancel.cancel('prefetch finished');
       }
     });
-    final cached = await _prefetch.retain(account, key);
+    final cached = await _prefetch.retain(
+      account,
+      key,
+      initialPosition: initialPosition,
+    );
     if (const bool.fromEnvironment('PILI_PRELOAD_TRACE')) {
       debugPrint(
         'PiliSnapshot bvid=$bvid cid=$cid token=${cached?.officialPreloadToken} retained=false',
@@ -234,6 +247,9 @@ abstract final class VideoHttp {
     }
     return response;
   }
+
+  static int? recentPlaybackPosition(String bvid, int cid) =>
+      _prefetch.playbackPosition(Accounts.video, bvid, cid);
 
   static void rememberPlaybackResponse(
     Account account,

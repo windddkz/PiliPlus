@@ -133,12 +133,16 @@ class PlayUrlPrefetch {
     if (!_usable(result)) return null;
     _entries.remove(key);
     _entries[key] = entry;
-    entry.position ??= result.lastPlayTime;
+    entry.position ??= entry.initialPosition ?? result.lastPlayTime;
     return result.copyForPlayback()
       ?..lastPlayTime = entry.position ?? result.lastPlayTime;
   }
 
-  Future<PlayUrlModel?> retain(Object account, PlayUrlKey key) async {
+  Future<PlayUrlModel?> retain(
+    Object account,
+    PlayUrlKey key, {
+    int? initialPosition,
+  }) async {
     _useAccount(account);
     final entry = _entries[key];
     if (entry == null || !entry.done || !_fresh(entry)) return null;
@@ -152,8 +156,26 @@ class PlayUrlPrefetch {
     }
     _entries.remove(key);
     _entries[key] = entry;
+    if (initialPosition != null && initialPosition >= 0) {
+      entry.initialPosition = initialPosition;
+    }
     return result.copyForPlayback()
-      ?..lastPlayTime = entry.position ?? result.lastPlayTime;
+      ?..lastPlayTime =
+          entry.position ?? entry.initialPosition ?? result.lastPlayTime;
+  }
+
+  int? playbackPosition(Object account, String bvid, int cid) {
+    if (!identical(_account, account)) return null;
+    for (final MapEntry(key: key, value: entry)
+        in _entries.entries.toList().reversed) {
+      if (key.bvid == bvid &&
+          key.cid == cid &&
+          _fresh(entry) &&
+          entry.position != null) {
+        return entry.position;
+      }
+    }
+    return null;
   }
 
   bool _usable(PlayUrlModel result) {
@@ -187,4 +209,5 @@ class _Entry {
   bool done = false;
   String? token;
   int? position;
+  int? initialPosition;
 }

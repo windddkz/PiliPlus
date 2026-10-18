@@ -1,3 +1,5 @@
+import 'package:PiliPlus/common/widgets/video_preload_scope.dart';
+import 'package:PiliPlus/pages/rcmd/preload_candidates.dart';
 import 'package:PiliPlus/common/widgets/button/icon_button.dart';
 import 'package:PiliPlus/common/widgets/dialog/dialog.dart';
 import 'package:PiliPlus/common/widgets/flutter/pop_scope.dart';
@@ -494,31 +496,39 @@ class _FavDetailPageState extends State<FavDetailPage> with GridMixin {
       Loading() => gridSkeleton,
       Success(:final response) =>
         response != null && response.isNotEmpty
-            ? SliverGrid.builder(
+            ? VideoPreloadScope(
+                candidates: [
+                  for (final item in response) favoritePreloadCandidate(item),
+                  null,
+                ],
                 gridDelegate: gridDelegate,
-                itemBuilder: (context, index) {
-                  if (index == response.length) {
-                    _favDetailController.onLoadMore();
-                    return Container(
-                      height: 60,
-                      alignment: Alignment.center,
-                      child: Text(
-                        _favDetailController.isEnd ? '没有更多了' : '加载中...',
-                        style: TextStyle(
-                          color: theme.colorScheme.outline,
-                          fontSize: 13,
+                isActive: () => !enableMultiSelect,
+                child: SliverGrid.builder(
+                  gridDelegate: gridDelegate,
+                  itemBuilder: (context, index) {
+                    if (index == response.length) {
+                      _favDetailController.onLoadMore();
+                      return Container(
+                        height: 60,
+                        alignment: Alignment.center,
+                        child: Text(
+                          _favDetailController.isEnd ? '没有更多了' : '加载中...',
+                          style: TextStyle(
+                            color: theme.colorScheme.outline,
+                            fontSize: 13,
+                          ),
                         ),
-                      ),
+                      );
+                    }
+                    FavDetailItemModel item = response[index];
+                    return FavVideoCardH(
+                      item: item,
+                      index: index,
+                      ctr: _favDetailController,
                     );
-                  }
-                  FavDetailItemModel item = response[index];
-                  return FavVideoCardH(
-                    item: item,
-                    index: index,
-                    ctr: _favDetailController,
-                  );
-                },
-                itemCount: response.length + 1,
+                  },
+                  itemCount: response.length + 1,
+                ),
               )
             : HttpError(onReload: _favDetailController.onReload),
       Error(:final errMsg) => HttpError(
