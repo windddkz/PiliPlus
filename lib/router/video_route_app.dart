@@ -1,3 +1,4 @@
+import 'package:PiliPlus/router/video_entry_transition.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
 import 'package:material_ui/material_ui.dart';
@@ -36,7 +37,11 @@ class VideoRouteApp extends GetMaterialApp {
 
 class _LiveVideoRoute extends GetPageRoute<dynamic> {
   _LiveVideoRoute(GetPageRoute<dynamic> route)
-    : super(
+    : entry = route.settings.arguments is Map
+          ? (route.settings.arguments as Map)['videoEntry']
+                as VideoEntrySnapshot?
+          : null,
+      super(
         settings: route.settings,
         parameter: route.parameter,
         barrierDismissible: route.barrierDismissible,
@@ -53,4 +58,34 @@ class _LiveVideoRoute extends GetPageRoute<dynamic> {
   // A transition snapshot prevents a newly created SurfaceView from being painted and attached.
   @override
   bool get allowSnapshotting => false;
+
+  final VideoEntrySnapshot? entry;
+
+  @override
+  Duration get transitionDuration => entry == null
+      ? super.transitionDuration
+      : const Duration(milliseconds: 200);
+
+  @override
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    final snapshot = entry;
+    return snapshot == null
+        ? super.buildTransitions(context, animation, secondaryAnimation, child)
+        : VideoEntryTransition(
+            snapshot: snapshot,
+            animation: animation,
+            child: child,
+          );
+  }
+
+  @override
+  void dispose() {
+    entry?.dispose();
+    super.dispose();
+  }
 }

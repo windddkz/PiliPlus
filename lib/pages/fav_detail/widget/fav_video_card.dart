@@ -34,7 +34,7 @@ class FavVideoCardH extends StatelessWidget {
 
   bool get isSort => ctr == null;
 
-  void _onTap() {
+  void _onTap(GlobalKey coverKey) {
     // 0/4/16/...: 正常；9: up自己删除；1: 其他原因删除
     if (const [1, 9].contains(item.attr)) {
       Get.toNamed('/member?mid=${item.upper?.mid}');
@@ -56,13 +56,14 @@ class FavVideoCardH extends StatelessWidget {
         );
         break;
       default:
-        ctr!.onViewFav(item, index);
+        ctr!.onViewFav(item, index, entryCoverKey: coverKey);
         break;
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final coverKey = GlobalKey();
     final isOwner = !isSort && ctr!.isOwner;
     late final enableMultiSelect = ctr?.enableMultiSelect.value ?? false;
     final colorScheme = ColorScheme.of(context);
@@ -88,7 +89,7 @@ class FavVideoCardH extends StatelessWidget {
             ? null
             : enableMultiSelect
             ? () => ctr!.onSelect(item)
-            : _onTap,
+            : () => _onTap(coverKey),
         onLongPress: onLongPress,
         onSecondaryTap: PlatformUtils.isMobile ? null : onLongPress,
         child: Padding(
@@ -108,10 +109,13 @@ class FavVideoCardH extends StatelessWidget {
                     return Stack(
                       clipBehavior: Clip.none,
                       children: [
-                        NetworkImgLayer(
-                          src: item.cover,
-                          width: maxWidth,
-                          height: maxHeight,
+                        RepaintBoundary(
+                          key: coverKey,
+                          child: NetworkImgLayer(
+                            src: item.cover,
+                            width: maxWidth,
+                            height: maxHeight,
+                          ),
                         ),
                         PBadge(
                           text: DurationUtils.formatDuration(item.duration),

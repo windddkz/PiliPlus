@@ -1,3 +1,5 @@
+import 'package:PiliPlus/router/video_entry_transition.dart';
+
 import 'dart:async' show unawaited;
 import 'dart:io' show Platform;
 import 'dart:math';
@@ -90,6 +92,7 @@ class VideoDetailPageV extends StatefulWidget {
 class _VideoDetailPageVState extends State<VideoDetailPageV>
     with RouteAware, RouteAwareMixin, WidgetsBindingObserver {
   final heroTag = Get.arguments['heroTag'];
+  final VideoEntrySnapshot? entrySnapshot = Get.arguments['videoEntry'];
 
   late final VideoDetailController videoDetailController;
   late final VideoReplyController _videoReplyController;
@@ -1480,6 +1483,7 @@ class _VideoDetailPageVState extends State<VideoDetailPageV>
   Widget videoPlayer({required double width, required double height}) {
     final isFullScreen = this.isFullScreen;
     return Stack(
+      key: entrySnapshot?.targetKey,
       clipBehavior: Clip.none,
       children: [
         const Positioned.fill(

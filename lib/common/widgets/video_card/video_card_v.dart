@@ -30,7 +30,7 @@ class VideoCardV extends StatelessWidget {
     this.onRemove,
   });
 
-  Future<void> onPushDetail() async {
+  Future<void> onPushDetail(BuildContext context, GlobalKey coverKey) async {
     switch (videoItem.goto) {
       case 'bangumi':
         PageUtils.viewPgc(epId: videoItem.param!);
@@ -52,7 +52,7 @@ class VideoCardV extends StatelessWidget {
             dimension = res.dimension;
           }
         }
-        if (cid != null) {
+        if (cid != null && context.mounted) {
           PageUtils.toVideoPage(
             aid: videoItem.aid,
             bvid: bvid,
@@ -61,6 +61,7 @@ class VideoCardV extends StatelessWidget {
             title: videoItem.title,
             isVertical: isVertical,
             dimension: dimension,
+            entryCoverKey: coverKey,
           );
         }
         break;
@@ -81,6 +82,7 @@ class VideoCardV extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final coverKey = GlobalKey();
     void onLongPress() => imageSaveDialog(
       title: videoItem.title,
       cover: videoItem.cover,
@@ -91,7 +93,7 @@ class VideoCardV extends StatelessWidget {
       children: [
         Card(
           child: InkWell(
-            onTap: onPushDetail,
+            onTap: () => onPushDetail(context, coverKey),
             onLongPress: onLongPress,
             onSecondaryTap: PlatformUtils.isMobile ? null : onLongPress,
             borderRadius: const .all(.circular(12)),
@@ -107,11 +109,14 @@ class VideoCardV extends StatelessWidget {
                       return Stack(
                         clipBehavior: Clip.none,
                         children: [
-                          NetworkImgLayer(
-                            src: videoItem.cover,
-                            width: maxWidth,
-                            height: maxHeight,
-                            borderRadius: const .vertical(top: .circular(12)),
+                          RepaintBoundary(
+                            key: coverKey,
+                            child: NetworkImgLayer(
+                              src: videoItem.cover,
+                              width: maxWidth,
+                              height: maxHeight,
+                              borderRadius: const .vertical(top: .circular(12)),
+                            ),
                           ),
                           if (videoItem.duration > 0)
                             PBadge(

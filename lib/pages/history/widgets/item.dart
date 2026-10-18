@@ -30,6 +30,7 @@ class HistoryItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final coverKey = GlobalKey();
     final theme = Theme.of(context);
     final hasDuration = item.hasDuration;
     final business = item.history.business;
@@ -46,7 +47,7 @@ class HistoryItem extends StatelessWidget {
       child: InkWell(
         onTap: enableMultiSelect
             ? () => ctr.onSelect(item)
-            : () => onPushHistory(item),
+            : () => onPushHistory(item, entryCoverKey: coverKey),
         onLongPress: onLongPress,
         onSecondaryTap: PlatformUtils.isMobile ? null : onLongPress,
         child: Stack(
@@ -69,12 +70,15 @@ class HistoryItem extends StatelessWidget {
                         return Stack(
                           clipBehavior: Clip.none,
                           children: [
-                            NetworkImgLayer(
-                              src: item.cover?.isNotEmpty == true
-                                  ? item.cover
-                                  : item.covers?.firstOrNull ?? '',
-                              width: maxWidth,
-                              height: maxHeight,
+                            RepaintBoundary(
+                              key: coverKey,
+                              child: NetworkImgLayer(
+                                src: item.cover?.isNotEmpty == true
+                                    ? item.cover
+                                    : item.covers?.firstOrNull ?? '',
+                                width: maxWidth,
+                                height: maxHeight,
+                              ),
                             ),
                             ?item.label,
                             if (hasDuration)
@@ -217,7 +221,10 @@ class HistoryItem extends StatelessWidget {
   }
 }
 
-Future<void> onPushHistory(HistoryItemModel item) async {
+Future<void> onPushHistory(
+  HistoryItemModel item, {
+  GlobalKey? entryCoverKey,
+}) async {
   final business = item.history.business;
   if (business?.contains('article') == true) {
     PageUtils.toDupNamed(
@@ -277,6 +284,7 @@ Future<void> onPushHistory(HistoryItemModel item) async {
         progress:
             VideoHttp.recentPlaybackPosition(bvid, cid) ??
             item.playbackProgress,
+        entryCoverKey: entryCoverKey,
       );
     }
   }

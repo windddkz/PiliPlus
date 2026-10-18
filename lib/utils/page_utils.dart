@@ -1,5 +1,7 @@
 import 'dart:math';
 
+import 'package:PiliPlus/router/video_entry_transition.dart';
+
 import 'package:PiliPlus/common/widgets/fractionally_sized_box.dart';
 import 'package:PiliPlus/common/widgets/image_viewer/gallery_viewer.dart';
 import 'package:PiliPlus/common/widgets/image_viewer/hero_dialog_route.dart';
@@ -547,7 +549,11 @@ abstract final class PageUtils {
     Dimension? dimension,
     int? rootRpId,
     int? secondRpId,
+    GlobalKey? entryCoverKey,
   }) {
+    final entry = off || Pref.pageTransition == Transition.noTransition
+        ? null
+        : VideoEntrySnapshot.capture(entryCoverKey);
     final arguments = {
       'aid': aid ?? IdUtils.bv2av(bvid!),
       'bvid': bvid ?? IdUtils.av2bv(aid!),
@@ -564,8 +570,20 @@ abstract final class PageUtils {
       rootRpIdKey: ?rootRpId,
       secondRpIdKey: ?secondRpId,
       ...?extraArguments,
+      'videoEntry': ?entry,
     };
-    return PageUtils.toDupNamed('/videoV', arguments: arguments, off: off);
+    try {
+      final result = PageUtils.toDupNamed<void>(
+        '/videoV',
+        arguments: arguments,
+        off: off,
+      );
+      if (result == null) entry?.dispose();
+      return result;
+    } catch (_) {
+      entry?.dispose();
+      rethrow;
+    }
   }
 
   static final _pgcRegex = RegExp(r'(ep|ss)(\d+)');

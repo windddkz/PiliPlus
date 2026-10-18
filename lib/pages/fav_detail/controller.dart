@@ -19,7 +19,7 @@ import 'package:PiliPlus/utils/page_utils.dart';
 import 'package:PiliPlus/utils/storage.dart';
 import 'package:PiliPlus/utils/storage_key.dart';
 import 'package:PiliPlus/utils/storage_pref.dart';
-import 'package:flutter/widgets.dart' show Text, ValueChanged;
+import 'package:flutter/widgets.dart' show Text, ValueChanged, GlobalKey;
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 
@@ -32,7 +32,11 @@ mixin BaseFavController
 
   ValueChanged<int>? updateCount;
 
-  void onViewFav(FavDetailItemModel item, int? index);
+  void onViewFav(
+    FavDetailItemModel item,
+    int? index, {
+    GlobalKey? entryCoverKey,
+  });
 
   Future<void> onCancelFav(int index, int id, int type) async {
     final res = await FavHttp.favVideo(
@@ -231,7 +235,11 @@ class FavDetailController
   }
 
   @override
-  void onViewFav(FavDetailItemModel item, int? index) {
+  void onViewFav(
+    FavDetailItemModel item,
+    int? index, {
+    GlobalKey? entryCoverKey,
+  }) {
     final folder = folderInfo.value;
     // TODO: dimension
     PageUtils.toVideoPage(
@@ -239,6 +247,7 @@ class FavDetailController
       cid: item.ugc!.firstCid!,
       cover: item.cover,
       title: item.title,
+      entryCoverKey: entryCoverKey,
       extraArguments: isPlayAll.value
           ? {
               'sourceType': SourceType.fav,

@@ -36,6 +36,7 @@ class VideoCardH extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final coverKey = GlobalKey();
     final theme = Theme.of(context);
     return Material(
       type: .transparency,
@@ -45,7 +46,8 @@ class VideoCardH extends StatelessWidget {
           InkWell(
             onLongPress: onLongPress,
             onSecondaryTap: PlatformUtils.isMobile ? null : onLongPress,
-            onTap: onTap ?? () => pushVideoH(videoItem),
+            onTap:
+                onTap ?? () => pushVideoH(videoItem, entryCoverKey: coverKey),
             child: Padding(
               padding: const .symmetric(
                 horizontal: Style.safeSpace,
@@ -66,10 +68,13 @@ class VideoCardH extends StatelessWidget {
                         return Stack(
                           clipBehavior: .none,
                           children: [
-                            NetworkImgLayer(
-                              src: videoItem.cover,
-                              width: maxWidth,
-                              height: maxHeight,
+                            RepaintBoundary(
+                              key: coverKey,
+                              child: NetworkImgLayer(
+                                src: videoItem.cover,
+                                width: maxWidth,
+                                height: maxHeight,
+                              ),
                             ),
                             if (videoItem.badge case final badge?)
                               PBadge(
@@ -216,7 +221,10 @@ class VideoCardH extends StatelessWidget {
   }
 }
 
-Future<void> pushVideoH(HorizontalVideoModel videoItem) async {
+Future<void> pushVideoH(
+  HorizontalVideoModel videoItem, {
+  GlobalKey? entryCoverKey,
+}) async {
   if (videoItem.isPugv ?? false) {
     PageUtils.viewPugv(seasonId: videoItem.seasonId);
     return;
@@ -253,6 +261,7 @@ Future<void> pushVideoH(HorizontalVideoModel videoItem) async {
       cover: videoItem.cover,
       title: videoItem.title,
       dimension: dimension,
+      entryCoverKey: entryCoverKey,
     );
   }
 }
