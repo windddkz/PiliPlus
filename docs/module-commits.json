@@ -1276,6 +1276,44 @@
         "validation/official_seek_test.dart",
         "validation/official_video_test.dart"
       ]
+    },
+    {
+      "commit": "b2424d008584f1f96ce31c09317d96eda2aa6b0f",
+      "title": "feat(preload): cover history and favorites with current resume positions",
+      "source_candidate": 344,
+      "files": [
+        "lib/common/widgets/video_preload_scope.dart",
+        "lib/http/play_url_prefetch.dart",
+        "lib/http/preload_queue.dart",
+        "lib/http/video.dart",
+        "lib/pages/fav_detail/view.dart",
+        "lib/pages/fav_search/view.dart",
+        "lib/pages/history/view.dart",
+        "lib/pages/history/widgets/item.dart",
+        "lib/pages/history_search/view.dart",
+        "lib/pages/rcmd/preload_candidates.dart",
+        "validation/library_preload_candidates_test.dart",
+        "validation/play_url_prefetch_test.dart",
+        "validation/preload_queue_test.dart"
+      ]
+    },
+    {
+      "commit": "b835d6fc9ac398f02068c7a34702c8fc5b4218d1",
+      "title": "feat(ui): animate painted video cards into the live detail page",
+      "source_candidate": 344,
+      "files": [
+        "lib/common/widgets/video_card/video_card_h.dart",
+        "lib/common/widgets/video_card/video_card_v.dart",
+        "lib/pages/fav_detail/controller.dart",
+        "lib/pages/fav_detail/widget/fav_video_card.dart",
+        "lib/pages/fav_search/controller.dart",
+        "lib/pages/history/widgets/item.dart",
+        "lib/pages/video/view.dart",
+        "lib/router/video_entry_transition.dart",
+        "lib/router/video_route_app.dart",
+        "lib/utils/page_utils.dart",
+        "validation/video_entry_transition_test.dart"
+      ]
     }
   ]
 }
