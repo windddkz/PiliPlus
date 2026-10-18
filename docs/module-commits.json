@@ -1250,6 +1250,32 @@
         "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
         "android/validation/OfficialPreparedStateCheck.java"
       ]
+    },
+    {
+      "commit": "52cff3ac3924dbf4f51675032716df11dfa15c74",
+      "title": "fix(player): retain latest seek target until its result settles",
+      "source_candidate": 343,
+      "files": [
+        "lib/plugin/pl_player/controller.dart",
+        "lib/plugin/pl_player/models/seek_display.dart",
+        "lib/plugin/pl_player/view/view.dart",
+        "validation/seek_display_test.dart"
+      ]
+    },
+    {
+      "commit": "5a164fd9cb2093b82c7a1ac54d28e2079c910ab3",
+      "title": "fix(video): preserve source aspect while the first window is laid out",
+      "source_candidate": 343,
+      "files": [
+        "android/app/src/main/java/com/example/piliplus/official/OfficialHdrSurface.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialPlayerPlugin.java",
+        "android/app/src/main/java/com/example/piliplus/official/OfficialRuntime.java",
+        "lib/plugin/pl_player/official_player.dart",
+        "lib/plugin/pl_player/widgets/official_video.dart",
+        "validation/official_player_test.dart",
+        "validation/official_seek_test.dart",
+        "validation/official_video_test.dart"
+      ]
     }
   ]
 }
